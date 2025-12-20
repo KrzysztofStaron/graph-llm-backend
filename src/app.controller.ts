@@ -4,7 +4,9 @@ import type { Response } from 'express';
 @Controller()
 export class AppController {
   @Post('api/v1/chat')
-  async chat(@Body() body: { message: string }): Promise<string> {
+  async chat(
+    @Body() body: { messages: { role: string; content: string }[] },
+  ): Promise<string> {
     const { OpenRouter } = await import('@openrouter/sdk');
 
     const openRouter = new OpenRouter({
@@ -17,12 +19,10 @@ export class AppController {
       provider: {
         sort: 'latency',
       },
-      messages: [
-        {
-          role: 'user',
-          content: body.message,
-        },
-      ],
+      messages: body.messages.map((message) => ({
+        role: message.role as 'user' | 'assistant' | 'system',
+        content: message.content,
+      })),
     });
 
     const content = response.choices[0]?.message?.content;
@@ -31,7 +31,7 @@ export class AppController {
 
   @Post('api/v1/chat/stream')
   async streamChat(
-    @Body() body: { message: string },
+    @Body() body: { messages: { role: string; content: string }[] },
     @Res() res: Response,
   ): Promise<void> {
     const { OpenRouter } = await import('@openrouter/sdk');
@@ -46,12 +46,10 @@ export class AppController {
       provider: {
         sort: 'latency',
       },
-      messages: [
-        {
-          role: 'user',
-          content: body.message,
-        },
-      ],
+      messages: body.messages.map((message) => ({
+        role: message.role as 'user' | 'assistant' | 'system',
+        content: message.content,
+      })),
     });
 
     res.setHeader('Content-Type', 'text/event-stream');

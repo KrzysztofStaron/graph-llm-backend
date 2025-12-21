@@ -1,8 +1,13 @@
-import { Controller, Post, Body, Res } from '@nestjs/common';
+import { Controller, Post, Body, Res, Get } from '@nestjs/common';
 import type { Response } from 'express';
 
 @Controller()
 export class AppController {
+  @Get()
+  root(): string {
+    return 'Graph LLM Backend';
+  }
+
   @Post('api/v1/chat')
   async chat(
     @Body() body: { messages: { role: string; content: string }[] },

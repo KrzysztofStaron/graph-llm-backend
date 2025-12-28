@@ -46,7 +46,7 @@ export class AppController {
     });
 
     const stream = await openRouter.chat.send({
-      model: 'x-ai/grok-4.1-fast',
+      model: 'openai/gpt-oss-120b',
       stream: true,
       provider: {
         sort: 'latency',

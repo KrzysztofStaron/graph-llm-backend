@@ -10,7 +10,15 @@ export class AppController {
 
   @Post('api/v1/chat')
   async chat(
-    @Body() body: { messages: { role: string; content: string }[] },
+    @Body()
+    body: {
+      messages: { role: string; content: string }[];
+      model?: string;
+      provider?: {
+        sort?: 'latency' | 'price' | 'throughput';
+        allow_fallbacks?: boolean;
+      };
+    },
   ): Promise<string> {
     const { OpenRouter } = await import('@openrouter/sdk');
 
@@ -19,9 +27,9 @@ export class AppController {
     });
 
     const response = await openRouter.chat.send({
-      model: 'x-ai/grok-4.1-fast',
+      model: body.model || 'x-ai/grok-4.1-fast',
       stream: false,
-      provider: {
+      provider: body.provider || {
         sort: 'latency',
       },
       messages: body.messages.map((message) => ({
@@ -36,7 +44,15 @@ export class AppController {
 
   @Post('api/v1/chat/stream')
   async streamChat(
-    @Body() body: { messages: { role: string; content: string }[] },
+    @Body()
+    body: {
+      messages: { role: string; content: string }[];
+      model?: string;
+      provider?: {
+        sort?: 'latency' | 'price' | 'throughput';
+        allow_fallbacks?: boolean;
+      };
+    },
     @Res() res: Response,
   ): Promise<void> {
     const { OpenRouter } = await import('@openrouter/sdk');
@@ -46,9 +62,9 @@ export class AppController {
     });
 
     const stream = await openRouter.chat.send({
-      model: 'x-ai/grok-4.1-fast',
+      model: body.model || 'x-ai/grok-4.1-fast',
       stream: true,
-      provider: {
+      provider: body.provider || {
         sort: 'latency',
       },
       messages: body.messages.map((message) => ({

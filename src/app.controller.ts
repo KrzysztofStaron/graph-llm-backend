@@ -5,7 +5,7 @@ import type { Response } from 'express';
 export class AppController {
   @Get()
   root(): string {
-    return 'Graph LLM Backend';
+    return 'Graph LLM Backend V.3';
   }
 
   @Post('api/v1/chat')
@@ -19,7 +19,7 @@ export class AppController {
     });
 
     const response = await openRouter.chat.send({
-      model: 'openai/gpt-oss-120b',
+      model: 'x-ai/grok-4.1-fast',
       stream: false,
       provider: {
         sort: 'latency',
@@ -46,7 +46,7 @@ export class AppController {
     });
 
     const stream = await openRouter.chat.send({
-      model: 'openai/gpt-oss-120b',
+      model: 'x-ai/grok-4.1-fast',
       stream: true,
       provider: {
         sort: 'latency',

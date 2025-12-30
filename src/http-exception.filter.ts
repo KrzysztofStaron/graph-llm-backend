@@ -27,12 +27,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
     response.setHeader('Access-Control-Allow-Origin', '*');
     response.setHeader(
       'Access-Control-Allow-Methods',
-      'GET, POST, PUT, DELETE, OPTIONS',
+      'GET, POST, PUT, DELETE, PATCH, OPTIONS',
     );
     response.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization',
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization, Content-Encoding',
     );
+    response.setHeader('Access-Control-Allow-Credentials', 'true');
 
     response.status(status).json(message);
   }

@@ -160,16 +160,18 @@ export class AppController {
   }
 
   @Options('api/v1/chat/stream')
-  async streamChatOptions(@Res() res: Response): Promise<void> {
+  streamChatOptions(@Res() res: Response): void {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader(
       'Access-Control-Allow-Methods',
-      'GET, POST, PUT, DELETE, OPTIONS',
+      'GET, POST, PUT, DELETE, PATCH, OPTIONS',
     );
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization',
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization, Content-Encoding',
     );
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400');
     res.status(204).send();
   }
 
@@ -182,12 +184,13 @@ export class AppController {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader(
       'Access-Control-Allow-Methods',
-      'GET, POST, PUT, DELETE, OPTIONS',
+      'GET, POST, PUT, DELETE, PATCH, OPTIONS',
     );
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization',
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization, Content-Encoding',
     );
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');

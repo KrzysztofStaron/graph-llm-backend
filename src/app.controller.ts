@@ -4,6 +4,7 @@ import {
   Body,
   Res,
   Get,
+  Options,
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
@@ -158,6 +159,14 @@ export class AppController {
     return typeof content === 'string' ? content : '';
   }
 
+  @Options('api/v1/chat/stream')
+  async streamChatOptions(@Res() res: Response): Promise<void> {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.status(204).send();
+  }
+
   @Post('api/v1/chat/stream')
   async streamChat(
     @Body() body: RequestBody,
@@ -193,6 +202,9 @@ export class AppController {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     const encoder = new TextEncoder();
 

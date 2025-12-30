@@ -23,9 +23,12 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             cd /root/graph-llm-backend
+            source /root/.nvm/nvm.sh
+            nvm use 22
             git fetch --all
             git reset --hard origin/master
             git pull
             pnpm install
             pnpm build
+            sudo systemctl daemon-reload
             sudo systemctl restart graph-llm-backend.service

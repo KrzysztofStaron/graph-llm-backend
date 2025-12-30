@@ -123,7 +123,7 @@ function transformMessages(messages: ChatMessageInput[]): MessageSDK[] {
 export class AppController {
   @Get()
   root(): string {
-    return 'Graph LLM Backend V.3';
+    return 'Graph LLM Backend V.4';
   }
 
   @Post('api/v1/chat')
@@ -162,8 +162,14 @@ export class AppController {
   @Options('api/v1/chat/stream')
   async streamChatOptions(@Res() res: Response): Promise<void> {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, DELETE, OPTIONS',
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization',
+    );
     res.status(204).send();
   }
 
@@ -172,6 +178,20 @@ export class AppController {
     @Body() body: RequestBody,
     @Res() res: Response,
   ): Promise<void> {
+    // Set CORS headers immediately before any processing
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, DELETE, OPTIONS',
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization',
+    );
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
     const { OpenRouter } = await import('@openrouter/sdk');
 
     const openRouter = new OpenRouter({
@@ -193,18 +213,15 @@ export class AppController {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
-      throw new HttpException(
-        { error: 'Failed to initialize chat stream', details: errorMessage },
-        HttpStatus.BAD_GATEWAY,
+      const encoder = new TextEncoder();
+      res.write(
+        encoder.encode(
+          `data: ${JSON.stringify({ error: 'Failed to initialize chat stream', details: errorMessage })}\n\n`,
+        ),
       );
+      res.end();
+      return;
     }
-
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     const encoder = new TextEncoder();
 

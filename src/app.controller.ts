@@ -124,7 +124,15 @@ function transformMessages(messages: ChatMessageInput[]): MessageSDK[] {
 export class AppController {
   @Get()
   root(): string {
-    return 'Graph LLM Backend V.5';
+    return `
+      Graph LLM Backend V.5
+
+      Available endpoints:
+      GET      /
+      POST     /api/v1/chat
+      OPTIONS  /api/v1/chat/stream
+      POST     /api/v1/chat/stream
+    `.trim();
   }
 
   @Post('api/v1/chat')
@@ -243,6 +251,93 @@ export class AppController {
         encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`),
       );
       res.end();
+    }
+  }
+
+  @Options('api/v1/text-to-speech')
+  textToSpeechOptions(@Req() req: Request, @Res() res: Response): void {
+    const origin = req.headers.origin;
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With',
+    );
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    res.status(204).end();
+  }
+
+  @Post('api/v1/text-to-speech')
+  async textToSpeech(
+    @Body() body: { text: string },
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    // Set CORS headers first
+    const origin = req.headers.origin;
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With',
+    );
+    res.setHeader('Access-Control-Expose-Headers', '*');
+
+    const { text } = body;
+    if (!text || typeof text !== 'string') {
+      res.status(HttpStatus.BAD_REQUEST).json({ error: 'Text is required' });
+      return;
+    }
+
+    const apiKey = process.env.DEEPGRAM_API_KEY;
+    if (!apiKey) {
+      res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .json({ error: 'DEEPGRAM_API_KEY is not configured' });
+      return;
+    }
+
+    try {
+      // Call Deepgram TTS API directly
+      const deepgramResponse = await fetch(
+        'https://api.deepgram.com/v1/speak?model=aura-2-odysseus-en',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Token ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ text }),
+        },
+      );
+
+      if (!deepgramResponse.ok) {
+        const errorText = await deepgramResponse.text();
+        res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+          error: 'Failed to generate speech',
+          details: `Deepgram API error: ${deepgramResponse.status} ${errorText}`,
+        });
+        return;
+      }
+
+      // Get audio buffer from response
+      const audioBuffer = await deepgramResponse.arrayBuffer();
+
+      // Set appropriate headers for audio
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Content-Length', audioBuffer.byteLength);
+      res.setHeader('Cache-Control', 'no-cache');
+
+      // Send the audio buffer
+      res.send(Buffer.from(audioBuffer));
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        error: 'Failed to generate speech',
+        details: errorMessage,
+      });
     }
   }
 }

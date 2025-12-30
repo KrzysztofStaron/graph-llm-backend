@@ -23,6 +23,8 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             cd /root/graph-llm-backend
+            git fetch --all
+            git reset --hard origin/master
             git pull
             pnpm install
             pnpm build

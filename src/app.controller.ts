@@ -123,7 +123,7 @@ function transformMessages(messages: ChatMessageInput[]): MessageSDK[] {
 export class AppController {
   @Get()
   root(): string {
-    return 'Graph LLM Backend V.4';
+    return 'Graph LLM Backend V.5';
   }
 
   @Post('api/v1/chat')

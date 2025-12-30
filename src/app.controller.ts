@@ -3,12 +3,13 @@ import {
   Post,
   Body,
   Res,
+  Req,
   Get,
   Options,
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Response, Request } from 'express';
 
 // SDK-compatible types (using camelCase for imageUrl as SDK expects)
 type TextContentPartSDK = { type: 'text'; text: string };
@@ -160,23 +161,33 @@ export class AppController {
   }
 
   @Options('api/v1/chat/stream')
-  streamChatOptions(@Res() res: Response): void {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', '*');
-    res.setHeader('Access-Control-Allow-Headers', '*');
+  streamChatOptions(@Req() req: Request, @Res() res: Response): void {
+    const origin = req.headers.origin;
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With',
+    );
     res.setHeader('Access-Control-Expose-Headers', '*');
-    res.status(204).send();
+    res.setHeader('Access-Control-Max-Age', '86400');
+    res.status(204).end();
   }
 
   @Post('api/v1/chat/stream')
   async streamChat(
     @Body() body: RequestBody,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    // Set CORS headers first - allow everything
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', '*');
-    res.setHeader('Access-Control-Allow-Headers', '*');
+    // Set CORS headers first
+    const origin = req.headers.origin;
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With',
+    );
     res.setHeader('Access-Control-Expose-Headers', '*');
     // Set streaming headers
     res.setHeader('Content-Type', 'text/event-stream');

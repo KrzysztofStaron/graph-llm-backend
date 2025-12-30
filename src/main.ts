@@ -9,15 +9,25 @@ async function bootstrap() {
 
   // CORS middleware - Set headers on ALL requests before anything else
   app.use((req: Request, res: Response, next: NextFunction) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', '*');
-    res.setHeader('Access-Control-Allow-Headers', '*');
+    const origin = req.headers.origin;
+
+    // Set CORS headers
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With',
+    );
     res.setHeader('Access-Control-Expose-Headers', '*');
     res.setHeader('Access-Control-Max-Age', '86400');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
 
     // Handle preflight requests immediately
     if (req.method === 'OPTIONS') {
-      res.status(204).send();
+      res.status(204).end();
       return;
     }
 

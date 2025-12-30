@@ -161,6 +161,15 @@ export class AppController {
 
   @Options('api/v1/chat/stream')
   streamChatOptions(@Res() res: Response): void {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization, Content-Encoding',
+    );
     res.status(204).send();
   }
 
@@ -169,6 +178,16 @@ export class AppController {
     @Body() body: RequestBody,
     @Res() res: Response,
   ): Promise<void> {
+    // Set CORS headers first (required when using @Res())
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Origin, X-Requested-With, Content-Type, Accept, Authorization, Content-Encoding',
+    );
     // Set streaming headers
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');

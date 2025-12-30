@@ -20,6 +20,6 @@ async function bootstrap() {
   // Add global exception filter to ensure CORS headers on all error responses
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  await app.listen(process.env.PORT ?? 9955);
+  await app.listen(process.env.PORT ?? 995);
 }
 void bootstrap();

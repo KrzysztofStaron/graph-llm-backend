@@ -33,7 +33,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
       'Access-Control-Allow-Headers',
       'Origin, X-Requested-With, Content-Type, Accept, Authorization, Content-Encoding',
     );
-    response.setHeader('Access-Control-Allow-Credentials', 'true');
 
     response.status(status).json(message);
   }

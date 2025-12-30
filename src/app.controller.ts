@@ -161,17 +161,6 @@ export class AppController {
 
   @Options('api/v1/chat/stream')
   streamChatOptions(@Res() res: Response): void {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader(
-      'Access-Control-Allow-Methods',
-      'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-    );
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Origin, X-Requested-With, Content-Type, Accept, Authorization, Content-Encoding',
-    );
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Max-Age', '86400');
     res.status(204).send();
   }
 
@@ -180,17 +169,7 @@ export class AppController {
     @Body() body: RequestBody,
     @Res() res: Response,
   ): Promise<void> {
-    // Set CORS headers immediately before any processing
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader(
-      'Access-Control-Allow-Methods',
-      'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-    );
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Origin, X-Requested-With, Content-Type, Accept, Authorization, Content-Encoding',
-    );
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    // Set streaming headers
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');

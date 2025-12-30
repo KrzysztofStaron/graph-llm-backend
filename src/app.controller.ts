@@ -270,7 +270,7 @@ export class AppController {
 
   @Post('api/v1/text-to-speech')
   async textToSpeech(
-    @Body() body: { text: string },
+    @Body() body: { text: string; includeTimestamps?: boolean },
     @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
@@ -284,7 +284,7 @@ export class AppController {
     );
     res.setHeader('Access-Control-Expose-Headers', '*');
 
-    const { text } = body;
+    const { text, includeTimestamps = false } = body;
     if (!text || typeof text !== 'string') {
       res.status(HttpStatus.BAD_REQUEST).json({ error: 'Text is required' });
       return;
@@ -321,16 +321,173 @@ export class AppController {
         return;
       }
 
-      // Get audio buffer from response
-      const audioBuffer = await deepgramResponse.arrayBuffer();
+      if (includeTimestamps) {
+        // For timestamps, we need to transcribe the audio
+        // Collect audio first, then transcribe it
+        const audioBuffer = await deepgramResponse.arrayBuffer();
+        const audioBlob = Buffer.from(audioBuffer);
 
-      // Set appropriate headers for audio
+        console.log('Audio buffer size:', audioBlob.length);
+
+        // Deepgram STT accepts raw binary audio data directly
+        // Send as raw binary with proper content-type header
+        const transcriptionResponse = await fetch(
+          'https://api.deepgram.com/v1/listen?model=nova-2&utterances=true&punctuate=true',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Token ${apiKey}`,
+              'Content-Type': 'audio/mpeg',
+            },
+            body: audioBlob,
+          },
+        );
+
+        if (!transcriptionResponse.ok) {
+          // If transcription fails, still return audio without timestamps
+          res.setHeader('Content-Type', 'audio/mpeg');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.send(audioBlob);
+          return;
+        }
+
+        const transcriptionDataRaw =
+          (await transcriptionResponse.json()) as unknown;
+        console.log(
+          'Transcription response structure:',
+          JSON.stringify(transcriptionDataRaw, null, 2).substring(0, 2000),
+        );
+        const transcriptionData = transcriptionDataRaw as {
+          results?: {
+            channels?: Array<{
+              alternatives?: Array<{
+                words?: Array<{
+                  word?: string;
+                  start?: number;
+                  end?: number;
+                  confidence?: number;
+                }>;
+              }>;
+            }>;
+            utterances?: Array<{
+              words?: Array<{
+                word?: string;
+                start?: number;
+                end?: number;
+              }>;
+            }>;
+          };
+        };
+
+        const words: Array<{
+          word: string;
+          start: number;
+          end: number;
+        }> = [];
+
+        // Extract word-level timestamps from transcription
+        // According to Deepgram docs: words are in results.channels[0].alternatives[0].words[]
+        if (transcriptionData?.results?.channels) {
+          for (const channel of transcriptionData.results.channels) {
+            if (channel.alternatives && Array.isArray(channel.alternatives)) {
+              for (const alternative of channel.alternatives) {
+                if (alternative.words && Array.isArray(alternative.words)) {
+                  for (const word of alternative.words) {
+                    if (
+                      word.word &&
+                      word.start !== undefined &&
+                      word.end !== undefined
+                    ) {
+                      words.push({
+                        word: word.word,
+                        start: word.start,
+                        end: word.end,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Also check utterances if available (some responses might use this structure)
+        if (words.length === 0 && transcriptionData?.results?.utterances) {
+          for (const utterance of transcriptionData.results.utterances) {
+            if (utterance.words && Array.isArray(utterance.words)) {
+              for (const word of utterance.words) {
+                if (
+                  word.word &&
+                  word.start !== undefined &&
+                  word.end !== undefined
+                ) {
+                  words.push({
+                    word: word.word,
+                    start: word.start,
+                    end: word.end,
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        console.log('Extracted words:', words.length);
+        if (words.length > 0) {
+          console.log('First few words:', words.slice(0, 5));
+        }
+
+        // Return JSON with audio as base64 and timestamps
+        res.setHeader('Content-Type', 'application/json');
+        res.json({
+          audio: audioBlob.toString('base64'),
+          words,
+          duration: words.length > 0 ? words[words.length - 1].end : 0,
+        });
+        return;
+      }
+
+      // Set appropriate headers for audio streaming (no timestamps)
       res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Content-Length', audioBuffer.byteLength);
       res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Transfer-Encoding', 'chunked');
 
-      // Send the audio buffer
-      res.send(Buffer.from(audioBuffer));
+      // Stream the response body directly to client
+      if (!deepgramResponse.body) {
+        throw new Error('Response body is null');
+      }
+
+      const reader = deepgramResponse.body.getReader();
+
+      const pump = async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              res.end();
+              break;
+            }
+            res.write(Buffer.from(value));
+          }
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : 'Unknown error';
+          if (!res.headersSent) {
+            res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+              error: 'Failed to stream audio',
+              details: errorMessage,
+            });
+          } else {
+            res.end();
+          }
+          throw error;
+        }
+      };
+
+      pump().catch((error) => {
+        // Error already handled in pump
+        console.error('Error streaming audio:', error);
+      });
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';

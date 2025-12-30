@@ -23,16 +23,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getResponse()
         : 'Internal server error';
 
-    // Ensure CORS headers are always set on error responses
+    // Ensure CORS headers are always set on error responses - allow everything
     response.setHeader('Access-Control-Allow-Origin', '*');
-    response.setHeader(
-      'Access-Control-Allow-Methods',
-      'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-    );
-    response.setHeader(
-      'Access-Control-Allow-Headers',
-      'Origin, X-Requested-With, Content-Type, Accept, Authorization, Content-Encoding',
-    );
+    response.setHeader('Access-Control-Allow-Methods', '*');
+    response.setHeader('Access-Control-Allow-Headers', '*');
+    response.setHeader('Access-Control-Expose-Headers', '*');
 
     response.status(status).json(message);
   }

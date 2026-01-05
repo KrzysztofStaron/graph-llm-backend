@@ -260,7 +260,7 @@ export class ChatController {
       model: body.model || 'x-ai/grok-4.1-fast',
       provider: body.provider,
       ip: req.ip,
-      messages: transformedMessages.map((msg) => ({
+      messages: transformedMessages.filter((msg) => msg.role !== 'system').map((msg) => ({
         role: msg.role,
         content: typeof msg.content === 'string' 
           ? msg.content.substring(0, 500) + (msg.content.length > 500 ? '...' : '')

@@ -152,7 +152,7 @@ export class ChatController {
       clientId,
       model,
       provider: body.provider,
-      messages: transformedMessages.map((msg) => ({
+      messages: transformedMessages.filter((msg) => msg.role !== 'system').map((msg) => ({
         role: msg.role,
         content: typeof msg.content === 'string' 
           ? msg.content.substring(0, 500) + (msg.content.length > 500 ? '...' : '')

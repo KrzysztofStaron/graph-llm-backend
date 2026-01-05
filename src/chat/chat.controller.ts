@@ -176,6 +176,13 @@ export class ChatController {
       // Provide more helpful error messages for common OpenRouter errors
       if (errorMessage.includes('User not found')) {
         errorMessage = 'Invalid or missing OpenRouter API key. Please check your OPENROUTER_API_KEY environment variable.';
+      } else if (errorMessage.includes('SAFETY_CHECK_TYPE_DATA_LEAKAGE')) {
+        errorMessage = 'Content was flagged by the AI provider\'s safety filter. This has been logged and should be resolved with a retry.';
+        logger.warn('Safety filter triggered (data leakage)', {
+          clientId,
+          model,
+          fullError: errorMessage,
+        });
       }
       
       logger.error('POST /api/v1/chat failed', {
@@ -284,6 +291,13 @@ export class ChatController {
       // Provide more helpful error messages for common OpenRouter errors
       if (errorMessage.includes('User not found')) {
         errorMessage = 'Invalid or missing OpenRouter API key. Please check your OPENROUTER_API_KEY environment variable.';
+      } else if (errorMessage.includes('SAFETY_CHECK_TYPE_DATA_LEAKAGE')) {
+        errorMessage = 'Content was flagged by the AI provider\'s safety filter. This has been logged and will be retried with a different format.';
+        logger.warn('Safety filter triggered (data leakage) - stream initialization', {
+          clientId,
+          model: body.model || 'x-ai/grok-4.1-fast',
+          fullError: error instanceof Error ? error.message : String(error),
+        });
       }
       
       logger.error('Failed to initialize chat stream', {
@@ -308,15 +322,33 @@ export class ChatController {
 
     const encoder = new TextEncoder();
     let fullResponse = '';
+    let chunkCount = 0;
 
     try {
       for await (const chunk of stream) {
+        chunkCount++;
         const content = chunk.choices[0]?.delta?.content ?? '';
         if (content) {
           fullResponse += content;
           res.write(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
         }
       }
+      
+      // Log warning if stream ended with no content
+      if (fullResponse.length === 0) {
+        logger.warn('POST /api/v1/chat/stream ended with no content', {
+          clientId,
+          model: body.model || 'x-ai/grok-4.1-fast',
+          chunkCount,
+          messagePreview: transformedMessages.filter((msg) => msg.role !== 'system').map((msg) => ({
+            role: msg.role,
+            content: typeof msg.content === 'string' 
+              ? msg.content.substring(0, 300)
+              : '[multipart content]',
+          })),
+        });
+      }
+      
       res.write(encoder.encode('data: [DONE]\n\n'));
       res.end();
       span.setAttribute('http.status_code', res.statusCode);
@@ -328,6 +360,7 @@ export class ChatController {
         clientId,
         response: fullResponse.substring(0, 1000) + (fullResponse.length > 1000 ? '...' : ''),
         responseLength: fullResponse.length,
+        chunkCount,
         statusCode: res.statusCode,
       });
     } catch (error) {
@@ -337,6 +370,8 @@ export class ChatController {
         clientId,
         error: errorMessage,
         stack: error instanceof Error ? error.stack : undefined,
+        chunkCount,
+        fullResponseLength: fullResponse.length,
       });
       res.write(
         encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`),

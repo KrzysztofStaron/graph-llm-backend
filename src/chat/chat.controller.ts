@@ -4,7 +4,6 @@ import {
   Body,
   Res,
   Req,
-  Options,
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
@@ -205,20 +204,6 @@ export class ChatController {
     return result;
   }
 
-  @Options('stream')
-  streamChatOptions(@Req() req: Request, @Res() res: Response): void {
-    const origin = req.headers.origin;
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With, X-Client-Id',
-    );
-    res.setHeader('Access-Control-Expose-Headers', '*');
-    res.setHeader('Access-Control-Max-Age', '86400');
-    res.status(204).end();
-  }
-
   @Post('stream')
   async streamChat(
     @Body() body: RequestBody,
@@ -235,15 +220,6 @@ export class ChatController {
     span.setAttribute('http.method', 'POST');
     span.setAttribute('http.url', '/api/v1/chat/stream');
     
-    // Set CORS headers first
-    const origin = req.headers.origin;
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With, X-Client-Id',
-    );
-    res.setHeader('Access-Control-Expose-Headers', '*');
     // Set streaming headers
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');

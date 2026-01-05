@@ -4,7 +4,6 @@ import {
   Body,
   Res,
   Req,
-  Options,
   HttpStatus,
 } from '@nestjs/common';
 import type { Response, Request } from 'express';
@@ -12,20 +11,6 @@ import logger from '../logger';
 
 @Controller('api/v1/text-to-speech')
 export class TtsController {
-  @Options()
-  textToSpeechOptions(@Req() req: Request, @Res() res: Response): void {
-    const origin = req.headers.origin;
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With, X-Client-Id',
-    );
-    res.setHeader('Access-Control-Expose-Headers', '*');
-    res.setHeader('Access-Control-Max-Age', '86400');
-    res.status(204).end();
-  }
-
   @Post()
   async textToSpeech(
     @Body() body: { text: string; includeTimestamps?: boolean },
@@ -40,16 +25,6 @@ export class TtsController {
       textLength: text?.length || 0,
       includeTimestamps,
     });
-
-    // Set CORS headers first
-    const origin = req.headers.origin;
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With, X-Client-Id',
-    );
-    res.setHeader('Access-Control-Expose-Headers', '*');
 
     if (!text || typeof text !== 'string') {
       logger.warn('POST /api/v1/text-to-speech failed', {

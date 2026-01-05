@@ -45,9 +45,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
     );
     response.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With',
+      'Content-Type, Authorization, X-Requested-With, X-Client-Id',
     );
-    response.setHeader('Access-Control-Expose-Headers', '*');
 
     response.status(status).json(message);
   }

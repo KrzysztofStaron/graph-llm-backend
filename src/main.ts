@@ -1,3 +1,4 @@
+import './telemetry';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { json } from 'express';
@@ -32,7 +33,7 @@ async function bootstrap() {
     );
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With',
+      'Content-Type, Authorization, X-Requested-With, X-Client-Id',
     );
     res.setHeader('Access-Control-Expose-Headers', '*');
     res.setHeader('Access-Control-Max-Age', '86400');
@@ -63,7 +64,7 @@ async function bootstrap() {
       }
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Client-Id'],
     exposedHeaders: '*',
     credentials: false,
     preflightContinue: false,

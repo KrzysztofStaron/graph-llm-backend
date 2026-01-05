@@ -25,6 +25,55 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Grafana Cloud Logging Setup
+
+This application uses Winston with Loki transport for centralized logging to Grafana Cloud.
+
+### Quick Setup (Free Forever Plan)
+
+1. **Sign up for Grafana Cloud**
+   - Visit https://grafana.com/auth/sign-up/
+   - Create a free account (no credit card required)
+   - Create a stack in the Cloud Portal
+
+2. **Get your Loki credentials**
+   - In Grafana: Go to **Connections > Data sources > Loki**
+   - Copy the **URL** (e.g., `https://logs-prod-XXX.grafana.net`)
+   - Note your **Instance ID** (the number in the URL or username field)
+
+3. **Create an API Token**
+   - Go to **Security > Access Policies**
+   - Create a new policy with scope: `logs:write`
+   - Generate a token and save it securely
+
+4. **Configure environment variables**
+   ```bash
+   LOKI_HOST=https://logs-prod-XXX.grafana.net
+   LOKI_BASIC_AUTH=INSTANCE_ID:API_TOKEN
+   LOG_LEVEL=info  # optional: debug, info, warn, error
+   ```
+
+   Example:
+   ```bash
+   LOKI_HOST=https://logs-prod-006.grafana.net
+   LOKI_BASIC_AUTH=123456:glc_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+   ```
+
+5. **View logs in Grafana**
+   - Launch your Grafana stack
+   - Go to **Explore** (compass icon)
+   - Select **Loki** data source
+   - Query: `{app="graph-llm-backend"}`
+   - Filter errors: `{app="graph-llm-backend"} |= "error"`
+
+### Free Plan Limits
+- 50 GB logs ingestion/month
+- 14 days retention
+- 10k metric series
+- 3 users
+
+Logs are automatically batched and sent to Grafana Cloud. The logger falls back to console output if `LOKI_HOST` is not set.
+
 ## Project setup
 
 ```bash

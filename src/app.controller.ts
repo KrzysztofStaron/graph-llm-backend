@@ -10,6 +10,8 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import type { Response, Request } from 'express';
+import { trace } from '@opentelemetry/api';
+import logger from './logger';
 
 // SDK-compatible types (using camelCase for imageUrl as SDK expects)
 type TextContentPartSDK = { type: 'text'; text: string };
@@ -136,11 +138,33 @@ export class AppController {
   }
 
   @Post('api/v1/chat')
-  async chat(@Body() body: RequestBody): Promise<string> {
+  async chat(@Body() body: RequestBody, @Req() req: Request): Promise<string> {
+    const clientId = req.headers['x-client-id'] as string | undefined;
+    const model = body.model || 'x-ai/grok-4.1-fast';
+    
+    logger.info('POST /api/v1/chat', {
+      clientId,
+      model,
+      messageCount: body.messages?.length || 0,
+      provider: body.provider,
+    });
+
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+    if (!apiKey || apiKey.length === 0) {
+      logger.error('POST /api/v1/chat failed', {
+        clientId,
+        error: 'OPENROUTER_API_KEY not set',
+      });
+      throw new HttpException(
+        { error: 'OPENROUTER_API_KEY environment variable is not set or is empty' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
     const { OpenRouter } = await import('@openrouter/sdk');
 
     const openRouter = new OpenRouter({
-      apiKey: process.env.OPENROUTER_API_KEY,
+      apiKey,
     });
 
     const transformedMessages = transformMessages(body.messages);
@@ -148,7 +172,7 @@ export class AppController {
     let response: ChatResponse;
     try {
       response = (await openRouter.chat.send({
-        model: body.model || 'x-ai/grok-4.1-fast',
+        model,
         stream: false,
         provider: body.provider || {
           sort: 'latency',
@@ -156,8 +180,19 @@ export class AppController {
         messages: transformedMessages,
       })) as ChatResponse;
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
+      let errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Provide more helpful error messages for common OpenRouter errors
+      if (errorMessage.includes('User not found')) {
+        errorMessage = 'Invalid or missing OpenRouter API key. Please check your OPENROUTER_API_KEY environment variable.';
+      }
+      
+      logger.error('POST /api/v1/chat failed', {
+        clientId,
+        model,
+        error: errorMessage,
+      });
+      
       throw new HttpException(
         { error: 'Failed to get chat response', details: errorMessage },
         HttpStatus.BAD_GATEWAY,
@@ -165,7 +200,15 @@ export class AppController {
     }
 
     const content = response.choices[0]?.message?.content;
-    return typeof content === 'string' ? content : '';
+    const result = typeof content === 'string' ? content : '';
+    
+    logger.info('POST /api/v1/chat completed', {
+      clientId,
+      model,
+      responseLength: result.length,
+    });
+    
+    return result;
   }
 
   @Options('api/v1/chat/stream')
@@ -175,7 +218,7 @@ export class AppController {
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With',
+      'Content-Type, Authorization, X-Requested-With, X-Client-Id',
     );
     res.setHeader('Access-Control-Expose-Headers', '*');
     res.setHeader('Access-Control-Max-Age', '86400');
@@ -188,13 +231,30 @@ export class AppController {
     @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
+    const tracer = trace.getTracer('chat-stream-tracer');
+    const span = tracer.startSpan('api/v1/chat/stream');
+    const clientId = req.headers['x-client-id'] as string | undefined;
+    
+    if (clientId) {
+      span.setAttribute('client.id', clientId);
+    }
+    span.setAttribute('http.method', 'POST');
+    span.setAttribute('http.url', '/api/v1/chat/stream');
+    
+    logger.info('Chat stream request received', {
+      clientId,
+      model: body.model,
+      messageCount: body.messages?.length || 0,
+      ip: req.ip,
+    });
+    
     // Set CORS headers first
     const origin = req.headers.origin;
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With',
+      'Content-Type, Authorization, X-Requested-With, X-Client-Id',
     );
     res.setHeader('Access-Control-Expose-Headers', '*');
     // Set streaming headers
@@ -202,10 +262,31 @@ export class AppController {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+    if (!apiKey || apiKey.length === 0) {
+      const errorMessage = 'OPENROUTER_API_KEY environment variable is not set or is empty';
+      logger.error('Failed to initialize chat stream', {
+        clientId,
+        error: errorMessage,
+      });
+      const encoder = new TextEncoder();
+      res.write(
+        encoder.encode(
+          `data: ${JSON.stringify({ error: 'Failed to initialize chat stream', details: errorMessage })}\n\n`,
+        ),
+      );
+      res.end();
+      span.setAttribute('http.status_code', 500);
+      span.setAttribute('error', true);
+      span.setAttribute('error.message', errorMessage);
+      span.end();
+      return;
+    }
+
     const { OpenRouter } = await import('@openrouter/sdk');
 
     const openRouter = new OpenRouter({
-      apiKey: process.env.OPENROUTER_API_KEY,
+      apiKey,
     });
 
     const transformedMessages = transformMessages(body.messages);
@@ -221,8 +302,19 @@ export class AppController {
         messages: transformedMessages,
       })) as AsyncIterable<ChatStreamChunk>;
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
+      let errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Provide more helpful error messages for common OpenRouter errors
+      if (errorMessage.includes('User not found')) {
+        errorMessage = 'Invalid or missing OpenRouter API key. Please check your OPENROUTER_API_KEY environment variable.';
+      }
+      
+      logger.error('Failed to initialize chat stream', {
+        clientId,
+        error: errorMessage,
+        originalError: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       const encoder = new TextEncoder();
       res.write(
         encoder.encode(
@@ -230,6 +322,10 @@ export class AppController {
         ),
       );
       res.end();
+      span.setAttribute('http.status_code', res.statusCode);
+      span.setAttribute('error', true);
+      span.setAttribute('error.message', errorMessage);
+      span.end();
       return;
     }
 
@@ -244,13 +340,29 @@ export class AppController {
       }
       res.write(encoder.encode('data: [DONE]\n\n'));
       res.end();
+      span.setAttribute('http.status_code', res.statusCode);
+      span.setAttribute('http.status_text', 'OK');
+      span.end();
+      logger.info('Chat stream completed successfully', {
+        clientId,
+        statusCode: res.statusCode,
+      });
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Stream error';
+      logger.error('Chat stream error', {
+        clientId,
+        error: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       res.write(
         encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`),
       );
       res.end();
+      span.setAttribute('http.status_code', res.statusCode);
+      span.setAttribute('error', true);
+      span.setAttribute('error.message', errorMessage);
+      span.end();
     }
   }
 
@@ -261,7 +373,7 @@ export class AppController {
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With',
+      'Content-Type, Authorization, X-Requested-With, X-Client-Id',
     );
     res.setHeader('Access-Control-Expose-Headers', '*');
     res.setHeader('Access-Control-Max-Age', '86400');
@@ -274,24 +386,40 @@ export class AppController {
     @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
+    const clientId = req.headers['x-client-id'] as string | undefined;
+    const { text, includeTimestamps = false } = body;
+    
+    logger.info('POST /api/v1/text-to-speech', {
+      clientId,
+      textLength: text?.length || 0,
+      includeTimestamps,
+    });
+
     // Set CORS headers first
     const origin = req.headers.origin;
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With',
+      'Content-Type, Authorization, X-Requested-With, X-Client-Id',
     );
     res.setHeader('Access-Control-Expose-Headers', '*');
 
-    const { text, includeTimestamps = false } = body;
     if (!text || typeof text !== 'string') {
+      logger.warn('POST /api/v1/text-to-speech failed', {
+        clientId,
+        error: 'Text is required',
+      });
       res.status(HttpStatus.BAD_REQUEST).json({ error: 'Text is required' });
       return;
     }
 
     const apiKey = process.env.DEEPGRAM_API_KEY;
     if (!apiKey) {
+      logger.error('POST /api/v1/text-to-speech failed', {
+        clientId,
+        error: 'DEEPGRAM_API_KEY not configured',
+      });
       res
         .status(HttpStatus.INTERNAL_SERVER_ERROR)
         .json({ error: 'DEEPGRAM_API_KEY is not configured' });
@@ -314,6 +442,11 @@ export class AppController {
 
       if (!deepgramResponse.ok) {
         const errorText = await deepgramResponse.text();
+        logger.error('POST /api/v1/text-to-speech failed', {
+          clientId,
+          error: 'Deepgram API error',
+          status: deepgramResponse.status,
+        });
         res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
           error: 'Failed to generate speech',
           details: `Deepgram API error: ${deepgramResponse.status} ${errorText}`,
@@ -326,8 +459,6 @@ export class AppController {
         // Collect audio first, then transcribe it
         const audioBuffer = await deepgramResponse.arrayBuffer();
         const audioBlob = Buffer.from(audioBuffer);
-
-        console.log('Audio buffer size:', audioBlob.length);
 
         // Deepgram STT accepts raw binary audio data directly
         // Send as raw binary with proper content-type header
@@ -345,6 +476,11 @@ export class AppController {
 
         if (!transcriptionResponse.ok) {
           // If transcription fails, still return audio without timestamps
+          logger.warn('POST /api/v1/text-to-speech transcription failed, returning audio only', {
+            clientId,
+            audioGenerated: true,
+            audioSize: audioBlob.length,
+          });
           res.setHeader('Content-Type', 'audio/mpeg');
           res.setHeader('Cache-Control', 'no-cache');
           res.send(audioBlob);
@@ -353,10 +489,6 @@ export class AppController {
 
         const transcriptionDataRaw =
           (await transcriptionResponse.json()) as unknown;
-        console.log(
-          'Transcription response structure:',
-          JSON.stringify(transcriptionDataRaw, null, 2).substring(0, 2000),
-        );
         const transcriptionData = transcriptionDataRaw as {
           results?: {
             channels?: Array<{
@@ -432,17 +564,20 @@ export class AppController {
           }
         }
 
-        console.log('Extracted words:', words.length);
-        if (words.length > 0) {
-          console.log('First few words:', words.slice(0, 5));
-        }
-
         // Return JSON with audio as base64 and timestamps
         res.setHeader('Content-Type', 'application/json');
         res.json({
           audio: audioBlob.toString('base64'),
           words,
           duration: words.length > 0 ? words[words.length - 1].end : 0,
+        });
+        
+        logger.info('POST /api/v1/text-to-speech completed', {
+          clientId,
+          audioGenerated: true,
+          audioSize: audioBlob.length,
+          wordCount: words.length,
+          includeTimestamps: true,
         });
         return;
       }
@@ -459,38 +594,47 @@ export class AppController {
 
       const reader = deepgramResponse.body.getReader();
 
+      let bytesStreamed = 0;
       const pump = async () => {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              res.end();
-              break;
-            }
-            res.write(Buffer.from(value));
-          }
-        } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : 'Unknown error';
-          if (!res.headersSent) {
-            res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
-              error: 'Failed to stream audio',
-              details: errorMessage,
-            });
-          } else {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
             res.end();
+            logger.info('POST /api/v1/text-to-speech completed', {
+              clientId,
+              audioGenerated: true,
+              bytesStreamed,
+              includeTimestamps: false,
+            });
+            break;
           }
-          throw error;
+          bytesStreamed += value.length;
+          res.write(Buffer.from(value));
         }
       };
 
       pump().catch((error) => {
-        // Error already handled in pump
-        console.error('Error streaming audio:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        logger.error('POST /api/v1/text-to-speech stream error', {
+          clientId,
+          error: errorMessage,
+        });
+        if (!res.headersSent) {
+          res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+            error: 'Failed to stream audio',
+            details: errorMessage,
+          });
+        } else {
+          res.end();
+        }
       });
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
+      logger.error('POST /api/v1/text-to-speech failed', {
+        clientId,
+        error: errorMessage,
+      });
       res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
         error: 'Failed to generate speech',
         details: errorMessage,

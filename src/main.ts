@@ -14,6 +14,7 @@ async function bootstrap() {
     'https://graphai.one',
     'https://www.graphai.one',
     'https://api.graphai.one',
+    'https://graph-llm-seven.vercel.app',
   ];
 
   // Increase body size limit to 50MB to handle large image payloads

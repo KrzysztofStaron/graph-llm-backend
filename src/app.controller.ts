@@ -169,6 +169,18 @@ export class AppController {
 
     const transformedMessages = transformMessages(body.messages);
 
+    // Log the context being sent
+    logger.info('Chat context', {
+      clientId,
+      model,
+      messages: transformedMessages.map((msg) => ({
+        role: msg.role,
+        content: typeof msg.content === 'string' 
+          ? msg.content.substring(0, 500) + (msg.content.length > 500 ? '...' : '')
+          : '[multipart content]',
+      })),
+    });
+
     let response: ChatResponse;
     try {
       response = (await openRouter.chat.send({
@@ -202,9 +214,11 @@ export class AppController {
     const content = response.choices[0]?.message?.content;
     const result = typeof content === 'string' ? content : '';
     
-    logger.info('POST /api/v1/chat completed', {
+    // Log the response
+    logger.info('Chat response', {
       clientId,
       model,
+      response: result.substring(0, 1000) + (result.length > 1000 ? '...' : ''),
       responseLength: result.length,
     });
     
@@ -291,6 +305,18 @@ export class AppController {
 
     const transformedMessages = transformMessages(body.messages);
 
+    // Log the context being sent
+    logger.info('Chat stream context', {
+      clientId,
+      model: body.model || 'x-ai/grok-4.1-fast',
+      messages: transformedMessages.map((msg) => ({
+        role: msg.role,
+        content: typeof msg.content === 'string' 
+          ? msg.content.substring(0, 500) + (msg.content.length > 500 ? '...' : '')
+          : '[multipart content]',
+      })),
+    });
+
     let stream: AsyncIterable<ChatStreamChunk>;
     try {
       stream = (await openRouter.chat.send({
@@ -330,11 +356,13 @@ export class AppController {
     }
 
     const encoder = new TextEncoder();
+    let fullResponse = '';
 
     try {
       for await (const chunk of stream) {
         const content = chunk.choices[0]?.delta?.content ?? '';
         if (content) {
+          fullResponse += content;
           res.write(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
         }
       }
@@ -343,6 +371,14 @@ export class AppController {
       span.setAttribute('http.status_code', res.statusCode);
       span.setAttribute('http.status_text', 'OK');
       span.end();
+      
+      // Log the full response
+      logger.info('Chat stream response', {
+        clientId,
+        response: fullResponse.substring(0, 1000) + (fullResponse.length > 1000 ? '...' : ''),
+        responseLength: fullResponse.length,
+      });
+      
       logger.info('Chat stream completed successfully', {
         clientId,
         statusCode: res.statusCode,

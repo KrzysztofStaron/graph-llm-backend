@@ -141,13 +141,6 @@ export class AppController {
   async chat(@Body() body: RequestBody, @Req() req: Request): Promise<string> {
     const clientId = req.headers['x-client-id'] as string | undefined;
     const model = body.model || 'x-ai/grok-4.1-fast';
-    
-    logger.info('POST /api/v1/chat', {
-      clientId,
-      model,
-      messageCount: body.messages?.length || 0,
-      provider: body.provider,
-    });
 
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey || apiKey.length === 0) {
@@ -169,10 +162,11 @@ export class AppController {
 
     const transformedMessages = transformMessages(body.messages);
 
-    // Log the context being sent
-    logger.info('Chat context', {
+    // Log the request with context
+    logger.info('POST /api/v1/chat', {
       clientId,
       model,
+      provider: body.provider,
       messages: transformedMessages.map((msg) => ({
         role: msg.role,
         content: typeof msg.content === 'string' 
@@ -215,7 +209,7 @@ export class AppController {
     const result = typeof content === 'string' ? content : '';
     
     // Log the response
-    logger.info('Chat response', {
+    logger.info('POST /api/v1/chat response', {
       clientId,
       model,
       response: result.substring(0, 1000) + (result.length > 1000 ? '...' : ''),
@@ -254,13 +248,6 @@ export class AppController {
     }
     span.setAttribute('http.method', 'POST');
     span.setAttribute('http.url', '/api/v1/chat/stream');
-    
-    logger.info('Chat stream request received', {
-      clientId,
-      model: body.model,
-      messageCount: body.messages?.length || 0,
-      ip: req.ip,
-    });
     
     // Set CORS headers first
     const origin = req.headers.origin;
@@ -305,10 +292,12 @@ export class AppController {
 
     const transformedMessages = transformMessages(body.messages);
 
-    // Log the context being sent
-    logger.info('Chat stream context', {
+    // Log the request with context
+    logger.info('POST /api/v1/chat/stream', {
       clientId,
       model: body.model || 'x-ai/grok-4.1-fast',
+      provider: body.provider,
+      ip: req.ip,
       messages: transformedMessages.map((msg) => ({
         role: msg.role,
         content: typeof msg.content === 'string' 
@@ -372,15 +361,11 @@ export class AppController {
       span.setAttribute('http.status_text', 'OK');
       span.end();
       
-      // Log the full response
-      logger.info('Chat stream response', {
+      // Log the response
+      logger.info('POST /api/v1/chat/stream response', {
         clientId,
         response: fullResponse.substring(0, 1000) + (fullResponse.length > 1000 ? '...' : ''),
         responseLength: fullResponse.length,
-      });
-      
-      logger.info('Chat stream completed successfully', {
-        clientId,
         statusCode: res.statusCode,
       });
     } catch (error) {

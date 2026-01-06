@@ -26,7 +26,7 @@ type UserMessageSDK = {
 
 type AssistantMessageSDK = {
   role: 'assistant';
-  content: string;
+  content: string | ContentPartSDK[];
 };
 
 type SystemMessageSDK = {
@@ -51,7 +51,7 @@ type UserMessageInput = {
 
 type AssistantMessageInput = {
   role: 'assistant';
-  content: string;
+  content: string | ContentPartInput[];
 };
 
 type SystemMessageInput = {
@@ -144,9 +144,9 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
     throw new Error('OPENROUTER_API_KEY not set for image generation');
   }
 
-  // Count how many images are in the context
+  // Count how many images are in the context (both user and assistant messages)
   const imageCount = messages.filter(msg => {
-    if (msg.role === 'user' && Array.isArray(msg.content)) {
+    if ((msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content)) {
       return msg.content.some(part => part.type === 'image_url');
     }
     return false;
@@ -176,7 +176,7 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
 
   // Log what we're sending to help debug
   const messagesWithImages = imageGenMessages.filter(msg => 
-    msg.role === 'user' && Array.isArray(msg.content)
+    (msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content)
   );
   
   logger.info('Image generation request details', {
@@ -186,7 +186,7 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
     messageStructure: imageGenMessages.map(msg => ({
       role: msg.role,
       contentType: typeof msg.content === 'string' ? 'string' : Array.isArray(msg.content) ? `array[${msg.content.length}]` : 'unknown',
-      hasImages: msg.role === 'user' && Array.isArray(msg.content) 
+      hasImages: (msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content) 
         ? msg.content.some(p => p.type === 'image_url')
         : false,
     })),
@@ -195,9 +195,9 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
   // Convert messages to API format (snake_case) for direct fetch call
   const apiMessages = convertMessagesToAPIFormat(imageGenMessages);
 
-  // Count images being sent
+  // Count images being sent (both user and assistant messages)
   const imagesSent = apiMessages.filter(msg => 
-    msg.role === 'user' && Array.isArray(msg.content)
+    (msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content)
   ).reduce((count, msg) => 
     count + msg.content.filter((p: any) => p.type === 'image_url').length, 0
   );
@@ -289,10 +289,10 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
 // Transform frontend message format to SDK format (snake_case image_url -> camelCase imageUrl)
 function transformMessages(messages: ChatMessageInput[]): MessageSDK[] {
   return messages.map((msg): MessageSDK => {
-    if (msg.role === 'user') {
+    if (msg.role === 'user' || msg.role === 'assistant') {
       const content = msg.content;
       if (typeof content === 'string') {
-        return { role: 'user', content };
+        return { ...msg, content } as MessageSDK;
       }
       // Transform content parts
       const transformedContent: ContentPartSDK[] = content.map((part) => {
@@ -308,7 +308,7 @@ function transformMessages(messages: ChatMessageInput[]): MessageSDK[] {
           },
         };
       });
-      return { role: 'user', content: transformedContent };
+      return { ...msg, content: transformedContent } as MessageSDK;
     }
     return msg;
   });
@@ -318,7 +318,7 @@ function transformMessages(messages: ChatMessageInput[]): MessageSDK[] {
 // Used when sending directly to OpenRouter API via fetch (not via SDK)
 function convertMessagesToAPIFormat(messages: MessageSDK[]): any[] {
   return messages.map((msg) => {
-    if (msg.role === 'user' && Array.isArray(msg.content)) {
+    if ((msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content)) {
       const apiContent = msg.content.map((part) => {
         if (part.type === 'text') {
           return { type: 'text', text: part.text };
@@ -332,7 +332,7 @@ function convertMessagesToAPIFormat(messages: MessageSDK[]): any[] {
           },
         };
       });
-      return { role: 'user', content: apiContent };
+      return { ...msg, content: apiContent };
     }
     return msg;
   });

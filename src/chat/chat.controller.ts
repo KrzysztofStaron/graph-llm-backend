@@ -74,10 +74,21 @@ type RequestBody = {
 };
 
 // Response types for SDK
+type ToolCall = {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+
 type ChatResponseChoice = {
   message?: {
     content?: string | null;
+    tool_calls?: ToolCall[];
   };
+  finish_reason?: string;
 };
 
 type ChatResponse = {
@@ -88,9 +99,194 @@ type ChatStreamChunk = {
   choices: {
     delta?: {
       content?: string | null;
+      tool_calls?: Array<{
+        index: number;
+        id?: string;
+        type?: string;
+        function?: {
+          name?: string;
+          arguments?: string;
+        };
+      }>;
     };
+    finish_reason?: string | null;
   }[];
 };
+
+// Tool definitions for image generation
+const IMAGE_GENERATION_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'generate_image',
+    description: 'Generate an image based on a text description. Use this when the user asks you to create, draw, visualize, or generate an image, illustration, diagram, or any visual content.',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: {
+          type: 'string',
+          description: 'A detailed description of the image to generate. Be specific about style, colors, composition, and subject matter.',
+        },
+        style: {
+          type: 'string',
+          enum: ['natural', 'vivid'],
+          description: 'The style of the generated image. "natural" produces more realistic images, "vivid" produces more dramatic and artistic images.',
+        },
+      },
+      required: ['prompt'],
+    },
+  },
+};
+
+// Image generation function
+async function generateImage(messages: MessageSDK[], prompt: string, style: string = 'vivid', retryCount: number = 0): Promise<string> {
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error('OPENROUTER_API_KEY not set for image generation');
+  }
+
+  // Count how many images are in the context
+  const imageCount = messages.filter(msg => {
+    if (msg.role === 'user' && Array.isArray(msg.content)) {
+      return msg.content.some(part => part.type === 'image_url');
+    }
+    return false;
+  }).length;
+
+  logger.info('Generating image with full context', { 
+    prompt: prompt.substring(0, 200), 
+    style, 
+    retryCount,
+    contextMessageCount: messages.length,
+    imagesInContext: imageCount
+  });
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:150',message:'Calling image generation via chat completion with full context',data:{promptLength:prompt.length,style,retryCount,messageCount:messages.length,imagesInContext:imageCount},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
+
+  // Use OpenRouter chat completion with Gemini 3 Pro Image (image editing model)
+  // Pass the full conversation context so it can see previous images and messages
+  const imageGenMessages: MessageSDK[] = [
+    {
+      role: 'system' as const,
+      content: 'You are an image generation and editing AI. Use the images and context from the conversation to generate or edit images based on the user\'s request. Always return an image.',
+    },
+    ...messages,
+    {
+      role: 'user' as const,
+      content: prompt,
+    },
+  ];
+
+  // Log what we're sending to help debug
+  const messagesWithImages = imageGenMessages.filter(msg => 
+    msg.role === 'user' && Array.isArray(msg.content)
+  );
+  
+  logger.info('Image generation request details', {
+    messageCount: imageGenMessages.length,
+    lastMessagePreview: imageGenMessages[imageGenMessages.length - 1]?.content?.toString().substring(0, 100),
+    multipartMessageCount: messagesWithImages.length,
+    messageStructure: imageGenMessages.map(msg => ({
+      role: msg.role,
+      contentType: typeof msg.content === 'string' ? 'string' : Array.isArray(msg.content) ? `array[${msg.content.length}]` : 'unknown',
+      hasImages: msg.role === 'user' && Array.isArray(msg.content) 
+        ? msg.content.some(p => p.type === 'image_url')
+        : false,
+    })),
+  });
+
+  // Convert messages to API format (snake_case) for direct fetch call
+  const apiMessages = convertMessagesToAPIFormat(imageGenMessages);
+
+  // Count images being sent
+  const imagesSent = apiMessages.filter(msg => 
+    msg.role === 'user' && Array.isArray(msg.content)
+  ).reduce((count, msg) => 
+    count + msg.content.filter((p: any) => p.type === 'image_url').length, 0
+  );
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:185',message:'Image generation messages structure',data:{messageCount:apiMessages.length,imagesSent,messages:apiMessages.map(msg=>({role:msg.role,contentType:typeof msg.content,contentLength:Array.isArray(msg.content)?msg.content.length:msg.content?.length||0,contentPreview:Array.isArray(msg.content)?msg.content.map((p:any)=>({type:p.type,hasUrl:p.type==='image_url'?!!p.image_url?.url:undefined,urlPrefix:p.type==='image_url'?p.image_url?.url?.substring(0,30):undefined})):undefined}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
+
+  logger.info('Sending image generation request', {
+    messageCount: apiMessages.length,
+    imagesSent,
+    model: 'google/gemini-3-pro-image-preview',
+  });
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://graphai.one',
+      'X-Title': 'GraphAI',
+    },
+    body: JSON.stringify({
+      model: 'google/gemini-3-pro-image-preview',
+      messages: apiMessages,
+      modalities: ['image', 'text'],
+      temperature: 0.9,
+    }),
+  });
+
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:174',message:'Image API response',data:{ok:response.ok,status:response.status,statusText:response.statusText},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:181',message:'Image generation API error',data:{status:response.status,errorText},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    logger.error('Image generation failed', { status: response.status, error: errorText });
+    throw new Error(`Image generation failed: ${errorText}`);
+  }
+
+  const data = await response.json() as { 
+    choices: Array<{ 
+      message: { 
+        content?: string;
+        images?: Array<{
+          type: string;
+          image_url: { url: string };
+        }>;
+      } 
+    }> 
+  };
+  
+  const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:195',message:'Parsed image response',data:{hasImages:!!data.choices?.[0]?.message?.images,imageUrlPrefix:imageUrl?.substring(0,50),fullResponse:JSON.stringify(data).substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
+  
+  if (!imageUrl || !imageUrl.startsWith('data:image/')) {
+    logger.error('Invalid image generation response structure', {
+      responsePreview: JSON.stringify(data).substring(0, 1000),
+      hasChoices: !!data.choices,
+      hasMessage: !!data.choices?.[0]?.message,
+      hasImages: !!data.choices?.[0]?.message?.images,
+      messageContent: data.choices?.[0]?.message?.content?.substring(0, 200),
+      messageKeys: data.choices?.[0]?.message ? Object.keys(data.choices[0].message) : [],
+      retryCount,
+    });
+    
+    // Retry up to 2 times if no image is returned
+    if (retryCount < 2) {
+      logger.warn('No image returned, retrying...', { retryCount: retryCount + 1 });
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+      return generateImage(messages, prompt, style, retryCount + 1);
+    }
+    
+    throw new Error(`No valid image URL returned after ${retryCount + 1} attempts. Got: ${imageUrl?.substring(0, 100)}`);
+  }
+
+  logger.info('Image generated successfully', { urlPrefix: imageUrl.substring(0, 50), retryCount });
+  return imageUrl;
+}
 
 // Transform frontend message format to SDK format (snake_case image_url -> camelCase imageUrl)
 function transformMessages(messages: ChatMessageInput[]): MessageSDK[] {
@@ -115,6 +311,30 @@ function transformMessages(messages: ChatMessageInput[]): MessageSDK[] {
         };
       });
       return { role: 'user', content: transformedContent };
+    }
+    return msg;
+  });
+}
+
+// Convert SDK format back to API format (camelCase imageUrl -> snake_case image_url)
+// Used when sending directly to OpenRouter API via fetch (not via SDK)
+function convertMessagesToAPIFormat(messages: MessageSDK[]): any[] {
+  return messages.map((msg) => {
+    if (msg.role === 'user' && Array.isArray(msg.content)) {
+      const apiContent = msg.content.map((part) => {
+        if (part.type === 'text') {
+          return { type: 'text', text: part.text };
+        }
+        // Convert imageUrl (camelCase) back to image_url (snake_case)
+        return {
+          type: 'image_url',
+          image_url: {
+            url: part.imageUrl.url,
+            detail: part.imageUrl.detail,
+          },
+        };
+      });
+      return { role: 'user', content: apiContent };
     }
     return msg;
   });
@@ -284,6 +504,8 @@ export class ChatController {
           sort: 'latency',
         },
         messages: transformedMessages,
+        tools: [IMAGE_GENERATION_TOOL],
+        toolChoice: 'auto',
       })) as AsyncIterable<ChatStreamChunk>;
     } catch (error) {
       let errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -323,23 +545,112 @@ export class ChatController {
     const encoder = new TextEncoder();
     let fullResponse = '';
     let chunkCount = 0;
+    
+    // Track tool calls being assembled from streaming chunks
+    const toolCallsInProgress: Map<number, { id: string; name: string; arguments: string }> = new Map();
+    let finishReason: string | null = null;
 
     try {
       for await (const chunk of stream) {
         chunkCount++;
-        const content = chunk.choices[0]?.delta?.content ?? '';
+        
+        const choice = chunk.choices?.[0];
+        if (!choice) continue;
+
+        const delta = choice.delta;
+        
+        // #region agent log
+        if (delta && (delta.tool_calls || (delta as any).toolCalls || (delta as any).tool_calls)) {
+          fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:435',message:'Tool call delta found',data:{delta},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+        }
+        // #endregion
+
+        // Track finish reason
+        if (choice.finish_reason || (choice as any).finishReason) {
+          finishReason = choice.finish_reason || (choice as any).finishReason;
+        }
+        
+        // Handle regular text content
+        const content = delta?.content ?? '';
         if (content) {
           fullResponse += content;
           res.write(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
         }
+        
+        // Handle tool calls (assembled from streaming chunks)
+        // Check both delta.tool_calls (OpenAI) and delta.toolCalls (camelCase fallback)
+        const toolCalls = delta?.tool_calls || (delta as any)?.toolCalls || (choice as any).tool_calls || (choice as any).toolCalls;
+        
+        if (toolCalls && Array.isArray(toolCalls)) {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:455',message:'Processing tool calls array',data:{count:toolCalls.length,firstItem:toolCalls[0]},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+          // #endregion
+          for (const toolCallDelta of toolCalls) {
+            const index = toolCallDelta.index ?? 0;
+            
+            if (!toolCallsInProgress.has(index)) {
+              toolCallsInProgress.set(index, {
+                id: toolCallDelta.id || '',
+                name: toolCallDelta.function?.name || '',
+                arguments: '',
+              });
+            }
+            
+            const toolCall = toolCallsInProgress.get(index)!;
+            if (toolCallDelta.id) toolCall.id = toolCallDelta.id;
+            
+            const func = toolCallDelta.function || (toolCallDelta as any).function;
+            if (func?.name) toolCall.name = func.name;
+            if (func?.arguments) toolCall.arguments += func.arguments;
+          }
+        }
       }
       
-      // Log warning if stream ended with no content
-      if (fullResponse.length === 0) {
+      // Process tool calls if any were found, regardless of finishReason
+      if (toolCallsInProgress.size > 0) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:503',message:'Tool calls found at stream end',data:{count:toolCallsInProgress.size,calls:Array.from(toolCallsInProgress.entries())},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        for (const [index, toolCall] of toolCallsInProgress) {
+          // If the model called the image generation tool
+          if (toolCall.name === 'generate_image') {
+            logger.info('Processing image generation tool call', {
+              clientId,
+              index,
+              toolCallId: toolCall.id,
+              arguments: toolCall.arguments,
+            });
+            
+            try {
+              const args = JSON.parse(toolCall.arguments) as { prompt: string; style?: string };
+              const imageUrl = await generateImage(transformedMessages, args.prompt, args.style);
+              
+              // Send image response in special format
+              res.write(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'image',
+                content: imageUrl,
+                prompt: args.prompt,
+              })}\n\n`));
+              
+              fullResponse = `[IMAGE:${imageUrl}]`;
+            } catch (imageError) {
+              const errorMsg = imageError instanceof Error ? imageError.message : 'Image generation failed';
+              logger.error('Image generation failed', { clientId, error: errorMsg, args: toolCall.arguments });
+              res.write(encoder.encode(`data: ${JSON.stringify({ 
+                error: `Failed to generate image: ${errorMsg}` 
+              })}\n\n`));
+            }
+          }
+        }
+      }
+      
+      // Log warning if stream ended with no content and no tool calls
+      if (fullResponse.length === 0 && toolCallsInProgress.size === 0) {
         logger.warn('POST /api/v1/chat/stream ended with no content', {
           clientId,
           model: body.model || 'x-ai/grok-4.1-fast',
           chunkCount,
+          finishReason,
           messagePreview: transformedMessages.filter((msg) => msg.role !== 'system').map((msg) => ({
             role: msg.role,
             content: typeof msg.content === 'string' 
@@ -361,6 +672,8 @@ export class ChatController {
         response: fullResponse.substring(0, 1000) + (fullResponse.length > 1000 ? '...' : ''),
         responseLength: fullResponse.length,
         chunkCount,
+        finishReason,
+        toolCallCount: toolCallsInProgress.size,
         statusCode: res.statusCode,
       });
     } catch (error) {

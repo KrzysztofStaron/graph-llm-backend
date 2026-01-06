@@ -216,76 +216,93 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
     model: 'google/gemini-3-pro-image-preview',
   });
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://graphai.one',
-      'X-Title': 'GraphAI',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-3-pro-image-preview',
-      messages: apiMessages,
-      modalities: ['image', 'text'],
-      temperature: 0.9,
-    }),
-  });
+  // Add timeout to prevent hanging requests
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:174',message:'Image API response',data:{ok:response.ok,status:response.status,statusText:response.statusText},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:181',message:'Image generation API error',data:{status:response.status,errorText},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
-    logger.error('Image generation failed', { status: response.status, error: errorText });
-    throw new Error(`Image generation failed: ${errorText}`);
-  }
-
-  const data = await response.json() as { 
-    choices: Array<{ 
-      message: { 
-        content?: string;
-        images?: Array<{
-          type: string;
-          image_url: { url: string };
-        }>;
-      } 
-    }> 
-  };
-  
-  const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-  
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:195',message:'Parsed image response',data:{hasImages:!!data.choices?.[0]?.message?.images,imageUrlPrefix:imageUrl?.substring(0,50),fullResponse:JSON.stringify(data).substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
-  
-  if (!imageUrl || !imageUrl.startsWith('data:image/')) {
-    logger.error('Invalid image generation response structure', {
-      responsePreview: JSON.stringify(data).substring(0, 1000),
-      hasChoices: !!data.choices,
-      hasMessage: !!data.choices?.[0]?.message,
-      hasImages: !!data.choices?.[0]?.message?.images,
-      messageContent: data.choices?.[0]?.message?.content?.substring(0, 200),
-      messageKeys: data.choices?.[0]?.message ? Object.keys(data.choices[0].message) : [],
-      retryCount,
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://graphai.one',
+        'X-Title': 'GraphAI',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-3-pro-image-preview',
+        messages: apiMessages,
+        modalities: ['image', 'text'],
+        temperature: 0.9,
+      }),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:174',message:'Image API response',data:{ok:response.ok,status:response.status,statusText:response.statusText},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:181',message:'Image generation API error',data:{status:response.status,errorText},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      logger.error('Image generation failed', { status: response.status, error: errorText });
+      throw new Error(`Image generation failed: ${errorText}`);
+    }
+
+    const data = await response.json() as { 
+      choices: Array<{ 
+        message: { 
+          content?: string;
+          images?: Array<{
+            type: string;
+            image_url: { url: string };
+          }>;
+        } 
+      }> 
+    };
     
-    // Retry up to 2 times if no image is returned
-    if (retryCount < 2) {
-      logger.warn('No image returned, retrying...', { retryCount: retryCount + 1 });
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
-      return generateImage(messages, prompt, style, retryCount + 1);
+    const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:195',message:'Parsed image response',data:{hasImages:!!data.choices?.[0]?.message?.images,imageUrlPrefix:imageUrl?.substring(0,50),fullResponse:JSON.stringify(data).substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    
+    if (!imageUrl || !imageUrl.startsWith('data:image/')) {
+      logger.error('Invalid image generation response structure', {
+        responsePreview: JSON.stringify(data).substring(0, 1000),
+        hasChoices: !!data.choices,
+        hasMessage: !!data.choices?.[0]?.message,
+        hasImages: !!data.choices?.[0]?.message?.images,
+        messageContent: data.choices?.[0]?.message?.content?.substring(0, 200),
+        messageKeys: data.choices?.[0]?.message ? Object.keys(data.choices[0].message) : [],
+        retryCount,
+      });
+      
+      // Retry up to 2 times if no image is returned
+      if (retryCount < 2) {
+        logger.warn('No image returned, retrying...', { retryCount: retryCount + 1 });
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        return generateImage(messages, prompt, style, retryCount + 1);
+      }
+      
+      throw new Error(`No valid image URL returned after ${retryCount + 1} attempts. Got: ${imageUrl?.substring(0, 100)}`);
+    }
+
+    logger.info('Image generated successfully', { urlPrefix: imageUrl.substring(0, 50), retryCount });
+    return imageUrl;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    
+    if (error.name === 'AbortError') {
+      logger.error('Image generation timed out', { retryCount, promptLength: prompt.length });
+      throw new Error('Image generation timed out after 60 seconds. The request may be too complex or the model may be overloaded.');
     }
     
-    throw new Error(`No valid image URL returned after ${retryCount + 1} attempts. Got: ${imageUrl?.substring(0, 100)}`);
+    throw error;
   }
-
-  logger.info('Image generated successfully', { urlPrefix: imageUrl.substring(0, 50), retryCount });
-  return imageUrl;
 }
 
 // Transform frontend message format to SDK format (snake_case image_url -> camelCase imageUrl)

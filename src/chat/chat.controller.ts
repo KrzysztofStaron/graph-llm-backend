@@ -160,10 +160,6 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
     imagesInContext: imageCount
   });
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:150',message:'Calling image generation via chat completion with full context',data:{promptLength:prompt.length,style,retryCount,messageCount:messages.length,imagesInContext:imageCount},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
-
   // Use OpenRouter chat completion with Gemini 3 Pro Image (image editing model)
   // Pass the full conversation context so it can see previous images and messages
   const imageGenMessages: MessageSDK[] = [
@@ -206,10 +202,6 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
     count + msg.content.filter((p: any) => p.type === 'image_url').length, 0
   );
 
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:185',message:'Image generation messages structure',data:{messageCount:apiMessages.length,imagesSent,messages:apiMessages.map(msg=>({role:msg.role,contentType:typeof msg.content,contentLength:Array.isArray(msg.content)?msg.content.length:msg.content?.length||0,contentPreview:Array.isArray(msg.content)?msg.content.map((p:any)=>({type:p.type,hasUrl:p.type==='image_url'?!!p.image_url?.url:undefined,urlPrefix:p.type==='image_url'?p.image_url?.url?.substring(0,30):undefined})):undefined}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
-
   logger.info('Sending image generation request', {
     messageCount: apiMessages.length,
     imagesSent,
@@ -239,15 +231,8 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
     });
     clearTimeout(timeoutId);
 
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:174',message:'Image API response',data:{ok:response.ok,status:response.status,statusText:response.statusText},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
-
     if (!response.ok) {
       const errorText = await response.text();
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:181',message:'Image generation API error',data:{status:response.status,errorText},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       logger.error('Image generation failed', { status: response.status, error: errorText });
       throw new Error(`Image generation failed: ${errorText}`);
     }
@@ -265,10 +250,6 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
     };
     
     const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:195',message:'Parsed image response',data:{hasImages:!!data.choices?.[0]?.message?.images,imageUrlPrefix:imageUrl?.substring(0,50),fullResponse:JSON.stringify(data).substring(0,500)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     
     if (!imageUrl || !imageUrl.startsWith('data:image/')) {
       logger.error('Invalid image generation response structure', {
@@ -575,12 +556,6 @@ export class ChatController {
         if (!choice) continue;
 
         const delta = choice.delta;
-        
-        // #region agent log
-        if (delta && (delta.tool_calls || (delta as any).toolCalls || (delta as any).tool_calls)) {
-          fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:435',message:'Tool call delta found',data:{delta},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-        }
-        // #endregion
 
         // Track finish reason
         if (choice.finish_reason || (choice as any).finishReason) {
@@ -599,9 +574,6 @@ export class ChatController {
         const toolCalls = delta?.tool_calls || (delta as any)?.toolCalls || (choice as any).tool_calls || (choice as any).toolCalls;
         
         if (toolCalls && Array.isArray(toolCalls)) {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:455',message:'Processing tool calls array',data:{count:toolCalls.length,firstItem:toolCalls[0]},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
-          // #endregion
           for (const toolCallDelta of toolCalls) {
             const index = toolCallDelta.index ?? 0;
             
@@ -625,9 +597,6 @@ export class ChatController {
       
       // Process tool calls if any were found, regardless of finishReason
       if (toolCallsInProgress.size > 0) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/ed17caec-2749-4a3c-95c9-6731b2da51e1',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat.controller.ts:503',message:'Tool calls found at stream end',data:{count:toolCallsInProgress.size,calls:Array.from(toolCallsInProgress.entries())},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         for (const [index, toolCall] of toolCallsInProgress) {
           // If the model called the image generation tool
           if (toolCall.name === 'generate_image') {

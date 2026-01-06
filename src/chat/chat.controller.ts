@@ -67,6 +67,7 @@ type ChatMessageInput =
 type RequestBody = {
   messages: ChatMessageInput[];
   model?: string;
+  imageModel?: string;
   provider?: {
     sort?: 'latency' | 'price' | 'throughput';
     allow_fallbacks?: boolean;
@@ -138,7 +139,7 @@ const IMAGE_GENERATION_TOOL = {
 };
 
 // Image generation function
-async function generateImage(messages: MessageSDK[], prompt: string, style: string = 'vivid', retryCount: number = 0): Promise<string> {
+async function generateImage(messages: MessageSDK[], prompt: string, style: string = 'vivid', model: string = 'google/gemini-3-pro-image-preview', retryCount: number = 0): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY not set for image generation');
@@ -205,7 +206,7 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
   logger.info('Sending image generation request', {
     messageCount: apiMessages.length,
     imagesSent,
-    model: 'google/gemini-3-pro-image-preview',
+    model,
   });
 
   // Add timeout to prevent hanging requests
@@ -222,8 +223,11 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
         'X-Title': 'GraphAI',
       },
       body: JSON.stringify({
-        model: 'google/gemini-3-pro-image-preview',
+        model,
         messages: apiMessages,
+        provider: {
+          sort: 'latency',
+        },
         modalities: ['image', 'text'],
         temperature: 0.9,
       }),
@@ -266,7 +270,7 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
       if (retryCount < 2) {
         logger.warn('No image returned, retrying...', { retryCount: retryCount + 1 });
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
-        return generateImage(messages, prompt, style, retryCount + 1);
+        return generateImage(messages, prompt, style, model, retryCount + 1);
       }
       
       throw new Error(`No valid image URL returned after ${retryCount + 1} attempts. Got: ${imageUrl?.substring(0, 100)}`);
@@ -609,7 +613,8 @@ export class ChatController {
             
             try {
               const args = JSON.parse(toolCall.arguments) as { prompt: string; style?: string };
-              const imageUrl = await generateImage(transformedMessages, args.prompt, args.style);
+              const imageModel = body.imageModel || 'google/gemini-3-pro-image-preview';
+              const imageUrl = await generateImage(transformedMessages, args.prompt, args.style, imageModel);
               
               // Send image response in special format
               res.write(encoder.encode(`data: ${JSON.stringify({ 

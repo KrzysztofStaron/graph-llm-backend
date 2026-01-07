@@ -64,6 +64,13 @@ type ChatMessageInput =
   | AssistantMessageInput
   | SystemMessageInput;
 
+type WebSearchPlugin = {
+  id: 'web';
+  max_results?: number;
+  engine?: 'native' | 'exa';
+  search_prompt?: string;
+};
+
 type RequestBody = {
   messages: ChatMessageInput[];
   model?: string;
@@ -72,6 +79,7 @@ type RequestBody = {
     sort?: 'latency' | 'price' | 'throughput';
     allow_fallbacks?: boolean;
   };
+  plugins?: WebSearchPlugin[];
 };
 
 // Response types for SDK
@@ -391,6 +399,7 @@ export class ChatController {
           sort: 'latency',
         },
         messages: transformedMessages,
+        ...(body.plugins && { plugins: body.plugins }),
       })) as ChatResponse;
     } catch (error) {
       let errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -508,6 +517,7 @@ export class ChatController {
         messages: transformedMessages,
         tools: [IMAGE_GENERATION_TOOL],
         toolChoice: 'auto',
+        ...(body.plugins && { plugins: body.plugins }),
       })) as AsyncIterable<ChatStreamChunk>;
     } catch (error) {
       let errorMessage = error instanceof Error ? error.message : 'Unknown error';

@@ -108,6 +108,7 @@ type ChatStreamChunk = {
   choices: {
     delta?: {
       content?: string | null;
+      reasoning?: string | null;
       tool_calls?: Array<{
         index: number;
         id?: string;
@@ -556,6 +557,7 @@ export class ChatController {
 
     const encoder = new TextEncoder();
     let fullResponse = '';
+    let fullReasoning = '';
     let chunkCount = 0;
     
     // Track tool calls being assembled from streaming chunks
@@ -574,6 +576,13 @@ export class ChatController {
         // Track finish reason
         if (choice.finish_reason || (choice as any).finishReason) {
           finishReason = choice.finish_reason || (choice as any).finishReason;
+        }
+        
+        // Handle reasoning content (from models like o1)
+        const reasoning = delta?.reasoning ?? (delta as any)?.reasoning_content ?? '';
+        if (reasoning) {
+          fullReasoning += reasoning;
+          res.write(encoder.encode(`data: ${JSON.stringify({ reasoning })}\n\n`));
         }
         
         // Handle regular text content
@@ -646,7 +655,7 @@ export class ChatController {
       }
       
       // Log warning if stream ended with no content and no tool calls
-      if (fullResponse.length === 0 && toolCallsInProgress.size === 0) {
+      if (fullResponse.length === 0 && fullReasoning.length === 0 && toolCallsInProgress.size === 0) {
         logger.warn('POST /api/v1/chat/stream ended with no content', {
           clientId,
           model: body.model || 'x-ai/grok-4.1-fast',
@@ -672,6 +681,7 @@ export class ChatController {
         clientId,
         response: fullResponse.substring(0, 1000) + (fullResponse.length > 1000 ? '...' : ''),
         responseLength: fullResponse.length,
+        reasoningLength: fullReasoning.length,
         chunkCount,
         finishReason,
         toolCallCount: toolCallsInProgress.size,

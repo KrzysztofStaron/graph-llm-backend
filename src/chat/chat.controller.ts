@@ -147,6 +147,29 @@ const IMAGE_GENERATION_TOOL = {
   },
 };
 
+// Tool definition for YouTube video embedding
+const YOUTUBE_VIDEO_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'show_youtube_video',
+    description: 'Embed a YouTube video in the graph when a video would significantly enhance your response. Use this when the user asks about topics that would benefit from video explanation, tutorial, demonstration, or visual learning. Only call this when a video would truly add value to the conversation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        videoId: {
+          type: 'string',
+          description: 'The YouTube video ID (the part after "v=" in the URL, e.g., "dQw4w9WgXcQ"). Make sure this is a real, relevant video ID.',
+        },
+        explanation: {
+          type: 'string',
+          description: 'A brief explanation of why this video is relevant and what the user will learn from it.',
+        },
+      },
+      required: ['videoId', 'explanation'],
+    },
+  },
+};
+
 // Image generation function
 async function generateImage(messages: MessageSDK[], prompt: string, style: string = 'vivid', model: string = 'google/gemini-3-pro-image-preview', retryCount: number = 0): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
@@ -516,7 +539,7 @@ export class ChatController {
           sort: 'latency',
         },
         messages: transformedMessages,
-        tools: [IMAGE_GENERATION_TOOL],
+        tools: [IMAGE_GENERATION_TOOL, YOUTUBE_VIDEO_TOOL],
         toolChoice: 'auto',
         ...(body.plugins && { plugins: body.plugins }),
       })) as AsyncIterable<ChatStreamChunk>;
@@ -648,6 +671,35 @@ export class ChatController {
               logger.error('Image generation failed', { clientId, error: errorMsg, args: toolCall.arguments });
               res.write(encoder.encode(`data: ${JSON.stringify({ 
                 error: `Failed to generate image: ${errorMsg}` 
+              })}\n\n`));
+            }
+          }
+          
+          // If the model called the YouTube video tool
+          if (toolCall.name === 'show_youtube_video') {
+            logger.info('Processing YouTube video tool call', {
+              clientId,
+              index,
+              toolCallId: toolCall.id,
+              arguments: toolCall.arguments,
+            });
+            
+            try {
+              const args = JSON.parse(toolCall.arguments) as { videoId: string; explanation?: string };
+              
+              // Send YouTube video response in special format
+              res.write(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'youtube',
+                videoId: args.videoId,
+                explanation: args.explanation || '',
+              })}\n\n`));
+              
+              fullResponse = `[YOUTUBE:${args.videoId}]`;
+            } catch (youtubeError) {
+              const errorMsg = youtubeError instanceof Error ? youtubeError.message : 'YouTube video embedding failed';
+              logger.error('YouTube video embedding failed', { clientId, error: errorMsg, args: toolCall.arguments });
+              res.write(encoder.encode(`data: ${JSON.stringify({ 
+                error: `Failed to embed YouTube video: ${errorMsg}` 
               })}\n\n`));
             }
           }

@@ -54,11 +54,14 @@ export class DocumentController {
       'text/csv',
       'application/json',
     ];
-    
-    const mimeType = (file.mimetype || 'application/octet-stream').toLowerCase();
+
+    const mimeType = (
+      file.mimetype || 'application/octet-stream'
+    ).toLowerCase();
     // Allow text/* mime types and specific allowed types
-    const isAllowed = mimeType.startsWith('text/') || allowedMimeTypes.includes(mimeType);
-    
+    const isAllowed =
+      mimeType.startsWith('text/') || allowedMimeTypes.includes(mimeType);
+
     if (!isAllowed) {
       res.status(HttpStatus.BAD_REQUEST).json({
         error: 'Unsupported file type',

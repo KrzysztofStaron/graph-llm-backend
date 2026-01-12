@@ -130,18 +130,21 @@ const IMAGE_GENERATION_TOOL = {
   type: 'function' as const,
   function: {
     name: 'generate_image',
-    description: 'Generate an image based on a text description. Use this when the user asks you to create, draw, visualize, or generate an image, illustration, diagram, or any visual content.',
+    description:
+      'Generate an image based on a text description. Use this when the user asks you to create, draw, visualize, or generate an image, illustration, diagram, or any visual content.',
     parameters: {
       type: 'object',
       properties: {
         prompt: {
           type: 'string',
-          description: 'A detailed description of the image to generate. Be specific about style, colors, composition, and subject matter.',
+          description:
+            'A detailed description of the image to generate. Be specific about style, colors, composition, and subject matter.',
         },
         style: {
           type: 'string',
           enum: ['natural', 'vivid'],
-          description: 'The style of the generated image. "natural" produces more realistic images, "vivid" produces more dramatic and artistic images.',
+          description:
+            'The style of the generated image. "natural" produces more realistic images, "vivid" produces more dramatic and artistic images.',
         },
       },
       required: ['prompt'],
@@ -154,17 +157,20 @@ const YOUTUBE_VIDEO_TOOL = {
   type: 'function' as const,
   function: {
     name: 'show_youtube_video',
-    description: 'Embed a YouTube video in the graph when a video would significantly enhance your response. Use this when the user asks about topics that would benefit from video explanation, tutorial, demonstration, or visual learning. Only call this when a video would truly add value to the conversation.',
+    description:
+      'Embed a YouTube video in the graph when a video would significantly enhance your response. Use this when the user asks about topics that would benefit from video explanation, tutorial, demonstration, or visual learning. Only call this when a video would truly add value to the conversation.',
     parameters: {
       type: 'object',
       properties: {
         videoId: {
           type: 'string',
-          description: 'The YouTube video ID (the part after "v=" in the URL, e.g., "dQw4w9WgXcQ"). Make sure this is a real, relevant video ID.',
+          description:
+            'The YouTube video ID (the part after "v=" in the URL, e.g., "dQw4w9WgXcQ"). Make sure this is a real, relevant video ID.',
         },
         explanation: {
           type: 'string',
-          description: 'A brief explanation of why this video is relevant and what the user will learn from it.',
+          description:
+            'A brief explanation of why this video is relevant and what the user will learn from it.',
         },
       },
       required: ['videoId', 'explanation'],
@@ -173,26 +179,35 @@ const YOUTUBE_VIDEO_TOOL = {
 };
 
 // Image generation function
-async function generateImage(messages: MessageSDK[], prompt: string, style: string = 'vivid', model: string = 'google/gemini-3-pro-image-preview', retryCount: number = 0): Promise<string> {
+async function generateImage(
+  messages: MessageSDK[],
+  prompt: string,
+  style: string = 'vivid',
+  model: string = 'google/gemini-3-pro-image-preview',
+  retryCount: number = 0,
+): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY not set for image generation');
   }
 
   // Count how many images are in the context (both user and assistant messages)
-  const imageCount = messages.filter(msg => {
-    if ((msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content)) {
-      return msg.content.some(part => part.type === 'image_url');
+  const imageCount = messages.filter((msg) => {
+    if (
+      (msg.role === 'user' || msg.role === 'assistant') &&
+      Array.isArray(msg.content)
+    ) {
+      return msg.content.some((part) => part.type === 'image_url');
     }
     return false;
   }).length;
 
-  logger.info('Generating image with full context', { 
-    prompt: prompt.substring(0, 200), 
-    style, 
+  logger.info('Generating image with full context', {
+    prompt: prompt.substring(0, 200),
+    style,
     retryCount,
     contextMessageCount: messages.length,
-    imagesInContext: imageCount
+    imagesInContext: imageCount,
   });
 
   // Use OpenRouter chat completion with Gemini 3 Pro Image (image editing model)
@@ -200,7 +215,8 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
   const imageGenMessages: MessageSDK[] = [
     {
       role: 'system' as const,
-      content: 'You are an image generation and editing AI. Use the images and context from the conversation to generate or edit images based on the user\'s request. Always return an image.',
+      content:
+        "You are an image generation and editing AI. Use the images and context from the conversation to generate or edit images based on the user's request. Always return an image.",
     },
     ...messages,
     {
@@ -210,20 +226,31 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
   ];
 
   // Log what we're sending to help debug
-  const messagesWithImages = imageGenMessages.filter(msg => 
-    (msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content)
+  const messagesWithImages = imageGenMessages.filter(
+    (msg) =>
+      (msg.role === 'user' || msg.role === 'assistant') &&
+      Array.isArray(msg.content),
   );
-  
+
   logger.info('Image generation request details', {
     messageCount: imageGenMessages.length,
-    lastMessagePreview: imageGenMessages[imageGenMessages.length - 1]?.content?.toString().substring(0, 100),
+    lastMessagePreview: imageGenMessages[imageGenMessages.length - 1]?.content
+      ?.toString()
+      .substring(0, 100),
     multipartMessageCount: messagesWithImages.length,
-    messageStructure: imageGenMessages.map(msg => ({
+    messageStructure: imageGenMessages.map((msg) => ({
       role: msg.role,
-      contentType: typeof msg.content === 'string' ? 'string' : Array.isArray(msg.content) ? `array[${msg.content.length}]` : 'unknown',
-      hasImages: (msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content) 
-        ? msg.content.some(p => p.type === 'image_url')
-        : false,
+      contentType:
+        typeof msg.content === 'string'
+          ? 'string'
+          : Array.isArray(msg.content)
+            ? `array[${msg.content.length}]`
+            : 'unknown',
+      hasImages:
+        (msg.role === 'user' || msg.role === 'assistant') &&
+        Array.isArray(msg.content)
+          ? msg.content.some((p) => p.type === 'image_url')
+          : false,
     })),
   });
 
@@ -231,11 +258,17 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
   const apiMessages = convertMessagesToAPIFormat(imageGenMessages);
 
   // Count images being sent (both user and assistant messages)
-  const imagesSent = apiMessages.filter(msg => 
-    (msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content)
-  ).reduce((count, msg) => 
-    count + msg.content.filter((p: any) => p.type === 'image_url').length, 0
-  );
+  const imagesSent = apiMessages
+    .filter(
+      (msg) =>
+        (msg.role === 'user' || msg.role === 'assistant') &&
+        Array.isArray(msg.content),
+    )
+    .reduce(
+      (count, msg) =>
+        count + msg.content.filter((p: any) => p.type === 'image_url').length,
+      0,
+    );
 
   logger.info('Sending image generation request', {
     messageCount: apiMessages.length,
@@ -248,47 +281,53 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
   const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://graphai.one',
-        'X-Title': 'GraphAI',
-      },
-      body: JSON.stringify({
-        model,
-        messages: apiMessages,
-        provider: {
-          sort: 'latency',
+    const response = await fetch(
+      'https://openrouter.ai/api/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://graphai.one',
+          'X-Title': 'GraphAI',
         },
-        modalities: ['image', 'text'],
-        temperature: 0.9,
-      }),
-      signal: controller.signal,
-    });
+        body: JSON.stringify({
+          model,
+          messages: apiMessages,
+          provider: {
+            sort: 'latency',
+          },
+          modalities: ['image', 'text'],
+          temperature: 0.9,
+        }),
+        signal: controller.signal,
+      },
+    );
     clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
-      logger.error('Image generation failed', { status: response.status, error: errorText });
+      logger.error('Image generation failed', {
+        status: response.status,
+        error: errorText,
+      });
       throw new Error(`Image generation failed: ${errorText}`);
     }
 
-    const data = await response.json() as { 
-      choices: Array<{ 
-        message: { 
+    const data = (await response.json()) as {
+      choices: Array<{
+        message: {
           content?: string;
           images?: Array<{
             type: string;
             image_url: { url: string };
           }>;
-        } 
-      }> 
+        };
+      }>;
     };
-    
+
     const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-    
+
     if (!imageUrl || !imageUrl.startsWith('data:image/')) {
       logger.error('Invalid image generation response structure', {
         responsePreview: JSON.stringify(data).substring(0, 1000),
@@ -296,30 +335,44 @@ async function generateImage(messages: MessageSDK[], prompt: string, style: stri
         hasMessage: !!data.choices?.[0]?.message,
         hasImages: !!data.choices?.[0]?.message?.images,
         messageContent: data.choices?.[0]?.message?.content?.substring(0, 200),
-        messageKeys: data.choices?.[0]?.message ? Object.keys(data.choices[0].message) : [],
+        messageKeys: data.choices?.[0]?.message
+          ? Object.keys(data.choices[0].message)
+          : [],
         retryCount,
       });
-      
+
       // Retry up to 2 times if no image is returned
       if (retryCount < 2) {
-        logger.warn('No image returned, retrying...', { retryCount: retryCount + 1 });
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        logger.warn('No image returned, retrying...', {
+          retryCount: retryCount + 1,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second before retry
         return generateImage(messages, prompt, style, model, retryCount + 1);
       }
-      
-      throw new Error(`No valid image URL returned after ${retryCount + 1} attempts. Got: ${imageUrl?.substring(0, 100)}`);
+
+      throw new Error(
+        `No valid image URL returned after ${retryCount + 1} attempts. Got: ${imageUrl?.substring(0, 100)}`,
+      );
     }
 
-    logger.info('Image generated successfully', { urlPrefix: imageUrl.substring(0, 50), retryCount });
+    logger.info('Image generated successfully', {
+      urlPrefix: imageUrl.substring(0, 50),
+      retryCount,
+    });
     return imageUrl;
   } catch (error: any) {
     clearTimeout(timeoutId);
-    
+
     if (error.name === 'AbortError') {
-      logger.error('Image generation timed out', { retryCount, promptLength: prompt.length });
-      throw new Error('Image generation timed out after 60 seconds. The request may be too complex or the model may be overloaded.');
+      logger.error('Image generation timed out', {
+        retryCount,
+        promptLength: prompt.length,
+      });
+      throw new Error(
+        'Image generation timed out after 60 seconds. The request may be too complex or the model may be overloaded.',
+      );
     }
-    
+
     throw error;
   }
 }
@@ -356,7 +409,10 @@ function transformMessages(messages: ChatMessageInput[]): MessageSDK[] {
 // Used when sending directly to OpenRouter API via fetch (not via SDK)
 function convertMessagesToAPIFormat(messages: MessageSDK[]): any[] {
   return messages.map((msg) => {
-    if ((msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content)) {
+    if (
+      (msg.role === 'user' || msg.role === 'assistant') &&
+      Array.isArray(msg.content)
+    ) {
       const apiContent = msg.content.map((part) => {
         if (part.type === 'text') {
           return { type: 'text', text: part.text };
@@ -392,7 +448,10 @@ export class ChatController {
         error: 'OPENROUTER_API_KEY not set',
       });
       throw new HttpException(
-        { error: 'OPENROUTER_API_KEY environment variable is not set or is empty' },
+        {
+          error:
+            'OPENROUTER_API_KEY environment variable is not set or is empty',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -410,12 +469,16 @@ export class ChatController {
       clientId,
       model,
       provider: body.provider,
-      messages: transformedMessages.filter((msg) => msg.role !== 'system').map((msg) => ({
-        role: msg.role,
-        content: typeof msg.content === 'string' 
-          ? msg.content.substring(0, 500) + (msg.content.length > 500 ? '...' : '')
-          : '[multipart content]',
-      })),
+      messages: transformedMessages
+        .filter((msg) => msg.role !== 'system')
+        .map((msg) => ({
+          role: msg.role,
+          content:
+            typeof msg.content === 'string'
+              ? msg.content.substring(0, 500) +
+                (msg.content.length > 500 ? '...' : '')
+              : '[multipart content]',
+        })),
     });
 
     let response: ChatResponse;
@@ -430,26 +493,29 @@ export class ChatController {
         ...(body.plugins && { plugins: body.plugins }),
       })) as ChatResponse;
     } catch (error) {
-      let errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
+      let errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+
       // Provide more helpful error messages for common OpenRouter errors
       if (errorMessage.includes('User not found')) {
-        errorMessage = 'Invalid or missing OpenRouter API key. Please check your OPENROUTER_API_KEY environment variable.';
+        errorMessage =
+          'Invalid or missing OpenRouter API key. Please check your OPENROUTER_API_KEY environment variable.';
       } else if (errorMessage.includes('SAFETY_CHECK_TYPE_DATA_LEAKAGE')) {
-        errorMessage = 'Content was flagged by the AI provider\'s safety filter. This has been logged and should be resolved with a retry.';
+        errorMessage =
+          "Content was flagged by the AI provider's safety filter. This has been logged and should be resolved with a retry.";
         logger.warn('Safety filter triggered (data leakage)', {
           clientId,
           model,
           fullError: errorMessage,
         });
       }
-      
+
       logger.error('POST /api/v1/chat failed', {
         clientId,
         model,
         error: errorMessage,
       });
-      
+
       throw new HttpException(
         { error: 'Failed to get chat response', details: errorMessage },
         HttpStatus.BAD_GATEWAY,
@@ -458,7 +524,7 @@ export class ChatController {
 
     const content = response.choices[0]?.message?.content;
     const result = typeof content === 'string' ? content : '';
-    
+
     // Log the response
     logger.info('POST /api/v1/chat response', {
       clientId,
@@ -466,7 +532,7 @@ export class ChatController {
       response: result.substring(0, 1000) + (result.length > 1000 ? '...' : ''),
       responseLength: result.length,
     });
-    
+
     return result;
   }
 
@@ -481,13 +547,13 @@ export class ChatController {
     const tracer = trace.getTracer('chat-stream-tracer');
     const span = tracer.startSpan('api/v1/chat/stream');
     const clientId = req.headers['x-client-id'] as string | undefined;
-    
+
     if (clientId) {
       span.setAttribute('client.id', clientId);
     }
     span.setAttribute('http.method', 'POST');
     span.setAttribute('http.url', '/api/v1/chat/stream');
-    
+
     // Set streaming headers
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -495,7 +561,8 @@ export class ChatController {
 
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey || apiKey.length === 0) {
-      const errorMessage = 'OPENROUTER_API_KEY environment variable is not set or is empty';
+      const errorMessage =
+        'OPENROUTER_API_KEY environment variable is not set or is empty';
       logger.error('Failed to initialize chat stream', {
         clientId,
         error: errorMessage,
@@ -528,12 +595,16 @@ export class ChatController {
       model: body.model || 'x-ai/grok-4.1-fast',
       provider: body.provider,
       ip: req.ip,
-      messages: transformedMessages.filter((msg) => msg.role !== 'system').map((msg) => ({
-        role: msg.role,
-        content: typeof msg.content === 'string' 
-          ? msg.content.substring(0, 500) + (msg.content.length > 500 ? '...' : '')
-          : '[multipart content]',
-      })),
+      messages: transformedMessages
+        .filter((msg) => msg.role !== 'system')
+        .map((msg) => ({
+          role: msg.role,
+          content:
+            typeof msg.content === 'string'
+              ? msg.content.substring(0, 500) +
+                (msg.content.length > 500 ? '...' : '')
+              : '[multipart content]',
+        })),
     });
 
     let stream: AsyncIterable<ChatStreamChunk>;
@@ -550,20 +621,26 @@ export class ChatController {
         ...(body.plugins && { plugins: body.plugins }),
       })) as AsyncIterable<ChatStreamChunk>;
     } catch (error) {
-      let errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
+      let errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+
       // Provide more helpful error messages for common OpenRouter errors
       if (errorMessage.includes('User not found')) {
-        errorMessage = 'Invalid or missing OpenRouter API key. Please check your OPENROUTER_API_KEY environment variable.';
+        errorMessage =
+          'Invalid or missing OpenRouter API key. Please check your OPENROUTER_API_KEY environment variable.';
       } else if (errorMessage.includes('SAFETY_CHECK_TYPE_DATA_LEAKAGE')) {
-        errorMessage = 'Content was flagged by the AI provider\'s safety filter. This has been logged and will be retried with a different format.';
-        logger.warn('Safety filter triggered (data leakage) - stream initialization', {
-          clientId,
-          model: body.model || 'x-ai/grok-4.1-fast',
-          fullError: error instanceof Error ? error.message : String(error),
-        });
+        errorMessage =
+          "Content was flagged by the AI provider's safety filter. This has been logged and will be retried with a different format.";
+        logger.warn(
+          'Safety filter triggered (data leakage) - stream initialization',
+          {
+            clientId,
+            model: body.model || 'x-ai/grok-4.1-fast',
+            fullError: error instanceof Error ? error.message : String(error),
+          },
+        );
       }
-      
+
       logger.error('Failed to initialize chat stream', {
         clientId,
         error: errorMessage,
@@ -588,15 +665,18 @@ export class ChatController {
     let fullResponse = '';
     let fullReasoning = '';
     let chunkCount = 0;
-    
+
     // Track tool calls being assembled from streaming chunks
-    const toolCallsInProgress: Map<number, { id: string; name: string; arguments: string }> = new Map();
+    const toolCallsInProgress: Map<
+      number,
+      { id: string; name: string; arguments: string }
+    > = new Map();
     let finishReason: string | null = null;
 
     try {
       for await (const chunk of stream) {
         chunkCount++;
-        
+
         const choice = chunk.choices?.[0];
         if (!choice) continue;
 
@@ -606,29 +686,36 @@ export class ChatController {
         if (choice.finish_reason || (choice as any).finishReason) {
           finishReason = choice.finish_reason || (choice as any).finishReason;
         }
-        
+
         // Handle reasoning content (from models like o1)
-        const reasoning = delta?.reasoning ?? (delta as any)?.reasoning_content ?? '';
+        const reasoning =
+          delta?.reasoning ?? (delta as any)?.reasoning_content ?? '';
         if (reasoning) {
           fullReasoning += reasoning;
-          res.write(encoder.encode(`data: ${JSON.stringify({ reasoning })}\n\n`));
+          res.write(
+            encoder.encode(`data: ${JSON.stringify({ reasoning })}\n\n`),
+          );
         }
-        
+
         // Handle regular text content
         const content = delta?.content ?? '';
         if (content) {
           fullResponse += content;
           res.write(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
         }
-        
+
         // Handle tool calls (assembled from streaming chunks)
         // Check both delta.tool_calls (OpenAI) and delta.toolCalls (camelCase fallback)
-        const toolCalls = delta?.tool_calls || (delta as any)?.toolCalls || (choice as any).tool_calls || (choice as any).toolCalls;
-        
+        const toolCalls =
+          delta?.tool_calls ||
+          (delta as any)?.toolCalls ||
+          (choice as any).tool_calls ||
+          (choice as any).toolCalls;
+
         if (toolCalls && Array.isArray(toolCalls)) {
           for (const toolCallDelta of toolCalls) {
             const index = toolCallDelta.index ?? 0;
-            
+
             if (!toolCallsInProgress.has(index)) {
               toolCallsInProgress.set(index, {
                 id: toolCallDelta.id || '',
@@ -636,17 +723,17 @@ export class ChatController {
                 arguments: '',
               });
             }
-            
+
             const toolCall = toolCallsInProgress.get(index)!;
             if (toolCallDelta.id) toolCall.id = toolCallDelta.id;
-            
-            const func = toolCallDelta.function || (toolCallDelta as any).function;
+
+            const func = toolCallDelta.function || toolCallDelta.function;
             if (func?.name) toolCall.name = func.name;
             if (func?.arguments) toolCall.arguments += func.arguments;
           }
         }
       }
-      
+
       // Process tool calls if any were found, regardless of finishReason
       if (toolCallsInProgress.size > 0) {
         for (const [index, toolCall] of toolCallsInProgress) {
@@ -658,29 +745,53 @@ export class ChatController {
               toolCallId: toolCall.id,
               arguments: toolCall.arguments,
             });
-            
+
             try {
-              const args = JSON.parse(toolCall.arguments) as { prompt: string; style?: string };
-              const imageModel = body.imageModel || 'google/gemini-3-pro-image-preview';
-              const imageUrl = await generateImage(transformedMessages, args.prompt, args.style, imageModel);
-              
+              const args = JSON.parse(toolCall.arguments) as {
+                prompt: string;
+                style?: string;
+              };
+              const imageModel =
+                body.imageModel || 'google/gemini-3-pro-image-preview';
+              const imageUrl = await generateImage(
+                transformedMessages,
+                args.prompt,
+                args.style,
+                imageModel,
+              );
+
               // Send image response in special format
-              res.write(encoder.encode(`data: ${JSON.stringify({ 
-                type: 'image',
-                content: imageUrl,
-                prompt: args.prompt,
-              })}\n\n`));
-              
+              res.write(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: 'image',
+                    content: imageUrl,
+                    prompt: args.prompt,
+                  })}\n\n`,
+                ),
+              );
+
               fullResponse += `[IMAGE:${imageUrl}]`;
             } catch (imageError) {
-              const errorMsg = imageError instanceof Error ? imageError.message : 'Image generation failed';
-              logger.error('Image generation failed', { clientId, error: errorMsg, args: toolCall.arguments });
-              res.write(encoder.encode(`data: ${JSON.stringify({ 
-                error: `Failed to generate image: ${errorMsg}` 
-              })}\n\n`));
+              const errorMsg =
+                imageError instanceof Error
+                  ? imageError.message
+                  : 'Image generation failed';
+              logger.error('Image generation failed', {
+                clientId,
+                error: errorMsg,
+                args: toolCall.arguments,
+              });
+              res.write(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    error: `Failed to generate image: ${errorMsg}`,
+                  })}\n\n`,
+                ),
+              );
             }
           }
-          
+
           // If the model called the YouTube video tool
           if (toolCall.name === 'show_youtube_video') {
             logger.info('Processing YouTube video tool call', {
@@ -689,55 +800,82 @@ export class ChatController {
               toolCallId: toolCall.id,
               arguments: toolCall.arguments,
             });
-            
+
             try {
-              const args = JSON.parse(toolCall.arguments) as { videoId: string; explanation?: string };
-              
+              const args = JSON.parse(toolCall.arguments) as {
+                videoId: string;
+                explanation?: string;
+              };
+
               // Send YouTube video response in special format (can be multiple)
-              res.write(encoder.encode(`data: ${JSON.stringify({ 
-                type: 'youtube',
-                videoId: args.videoId,
-                explanation: args.explanation || '',
-              })}\n\n`));
-              
+              res.write(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: 'youtube',
+                    videoId: args.videoId,
+                    explanation: args.explanation || '',
+                  })}\n\n`,
+                ),
+              );
+
               fullResponse += `[YOUTUBE:${args.videoId}]`;
             } catch (youtubeError) {
-              const errorMsg = youtubeError instanceof Error ? youtubeError.message : 'YouTube video embedding failed';
-              logger.error('YouTube video embedding failed', { clientId, error: errorMsg, args: toolCall.arguments });
-              res.write(encoder.encode(`data: ${JSON.stringify({ 
-                error: `Failed to embed YouTube video: ${errorMsg}` 
-              })}\n\n`));
+              const errorMsg =
+                youtubeError instanceof Error
+                  ? youtubeError.message
+                  : 'YouTube video embedding failed';
+              logger.error('YouTube video embedding failed', {
+                clientId,
+                error: errorMsg,
+                args: toolCall.arguments,
+              });
+              res.write(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    error: `Failed to embed YouTube video: ${errorMsg}`,
+                  })}\n\n`,
+                ),
+              );
             }
           }
         }
       }
-      
+
       // Log warning if stream ended with no content and no tool calls
-      if (fullResponse.length === 0 && fullReasoning.length === 0 && toolCallsInProgress.size === 0) {
+      if (
+        fullResponse.length === 0 &&
+        fullReasoning.length === 0 &&
+        toolCallsInProgress.size === 0
+      ) {
         logger.warn('POST /api/v1/chat/stream ended with no content', {
           clientId,
           model: body.model || 'x-ai/grok-4.1-fast',
           chunkCount,
           finishReason,
-          messagePreview: transformedMessages.filter((msg) => msg.role !== 'system').map((msg) => ({
-            role: msg.role,
-            content: typeof msg.content === 'string' 
-              ? msg.content.substring(0, 300)
-              : '[multipart content]',
-          })),
+          messagePreview: transformedMessages
+            .filter((msg) => msg.role !== 'system')
+            .map((msg) => ({
+              role: msg.role,
+              content:
+                typeof msg.content === 'string'
+                  ? msg.content.substring(0, 300)
+                  : '[multipart content]',
+            })),
         });
       }
-      
+
       res.write(encoder.encode('data: [DONE]\n\n'));
       res.end();
       span.setAttribute('http.status_code', res.statusCode);
       span.setAttribute('http.status_text', 'OK');
       span.end();
-      
+
       // Log the response
       logger.info('POST /api/v1/chat/stream response', {
         clientId,
-        response: fullResponse.substring(0, 1000) + (fullResponse.length > 1000 ? '...' : ''),
+        response:
+          fullResponse.substring(0, 1000) +
+          (fullResponse.length > 1000 ? '...' : ''),
         responseLength: fullResponse.length,
         reasoningLength: fullReasoning.length,
         chunkCount,
@@ -766,4 +904,3 @@ export class ChatController {
     }
   }
 }
-

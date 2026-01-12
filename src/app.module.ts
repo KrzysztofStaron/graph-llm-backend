@@ -35,8 +35,8 @@ import { ThrottlerExceptionFilter } from './throttler-exception.filter';
       },
       {
         name: 'document',
-        ttl: 60000, 
-        limit: 1000, 
+        ttl: 60000,
+        limit: 1000,
       },
     ]),
     DocumentModule,

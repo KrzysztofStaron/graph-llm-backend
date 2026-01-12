@@ -25,7 +25,7 @@ export class StorageController {
     }
 
     const result = await this.storageService.uploadImage(file);
-    
+
     return {
       success: true,
       url: result.url,
@@ -33,4 +33,3 @@ export class StorageController {
     };
   }
 }
-

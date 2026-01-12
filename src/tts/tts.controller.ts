@@ -23,7 +23,7 @@ export class TtsController {
   ): Promise<void> {
     const clientId = req.headers['x-client-id'] as string | undefined;
     const { text, includeTimestamps = false } = body;
-    
+
     logger.info('POST /api/v1/text-to-speech', {
       clientId,
       textLength: text?.length || 0,
@@ -101,11 +101,14 @@ export class TtsController {
 
         if (!transcriptionResponse.ok) {
           // If transcription fails, still return audio without timestamps
-          logger.warn('POST /api/v1/text-to-speech transcription failed, returning audio only', {
-            clientId,
-            audioGenerated: true,
-            audioSize: audioBlob.length,
-          });
+          logger.warn(
+            'POST /api/v1/text-to-speech transcription failed, returning audio only',
+            {
+              clientId,
+              audioGenerated: true,
+              audioSize: audioBlob.length,
+            },
+          );
           res.setHeader('Content-Type', 'audio/mpeg');
           res.setHeader('Cache-Control', 'no-cache');
           res.send(audioBlob);
@@ -196,7 +199,7 @@ export class TtsController {
           words,
           duration: words.length > 0 ? words[words.length - 1].end : 0,
         });
-        
+
         logger.info('POST /api/v1/text-to-speech completed', {
           clientId,
           audioGenerated: true,
@@ -239,7 +242,8 @@ export class TtsController {
       };
 
       pump().catch((error) => {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
         logger.error('POST /api/v1/text-to-speech stream error', {
           clientId,
           error: errorMessage,
@@ -267,4 +271,3 @@ export class TtsController {
     }
   }
 }
-

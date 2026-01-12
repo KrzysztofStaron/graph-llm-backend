@@ -2,6 +2,7 @@ import { config } from 'dotenv';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import logger from './logger';
 
 config();
 
@@ -22,10 +23,16 @@ if (traceExporter) {
   });
 
   sdk.start();
-  console.log(`OpenTelemetry initialized - exporting to Grafana at ${otlpEndpoint}`);
-  console.log(`Resource attributes: ${process.env.OTEL_RESOURCE_ATTRIBUTES || 'none'}`);
+  logger.info(
+    `OpenTelemetry initialized - exporting to Grafana at ${otlpEndpoint}`,
+  );
+  logger.info(
+    `Resource attributes: ${process.env.OTEL_RESOURCE_ATTRIBUTES || 'none'}`,
+  );
 } else {
-  console.log('OpenTelemetry disabled - set OTEL_EXPORTER_OTLP_ENDPOINT to enable tracing');
+  logger.info(
+    'OpenTelemetry disabled - set OTEL_EXPORTER_OTLP_ENDPOINT to enable tracing',
+  );
 }
 
 export { sdk };

@@ -10,10 +10,17 @@ const graphanaUser = process.env.GRAPHANA_USER;
 const graphanaToken = process.env.GRAPHANA_TOKEN;
 const lokiBasicAuth =
   process.env.LOKI_BASIC_AUTH ||
-  (graphanaUser && graphanaToken ? `${graphanaUser}:${graphanaToken}` : undefined);
+  (graphanaUser && graphanaToken
+    ? `${graphanaUser}:${graphanaToken}`
+    : undefined);
 
 // Simple function to send log to Loki
-async function sendToLoki(info: { message: unknown; level: string; timestamp?: string; [key: string]: unknown }): Promise<void> {
+async function sendToLoki(info: {
+  message: unknown;
+  level: string;
+  timestamp?: string;
+  [key: string]: unknown;
+}): Promise<void> {
   if (!lokiHost || !lokiBasicAuth) return;
 
   const timestamp = info.timestamp || new Date().toISOString();

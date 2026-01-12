@@ -6,7 +6,9 @@ import {
   Req,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
+import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import type { Response, Request } from 'express';
 import { trace } from '@opentelemetry/api';
 import logger from '../logger';
@@ -377,6 +379,8 @@ function convertMessagesToAPIFormat(messages: MessageSDK[]): any[] {
 @Controller('api/v1/chat')
 export class ChatController {
   @Post()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 1000, ttl: 60000 } })
   async chat(@Body() body: RequestBody, @Req() req: Request): Promise<string> {
     const clientId = req.headers['x-client-id'] as string | undefined;
     const model = body.model || 'x-ai/grok-4.1-fast';
@@ -467,6 +471,8 @@ export class ChatController {
   }
 
   @Post('stream')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 1000, ttl: 60000 } })
   async streamChat(
     @Body() body: RequestBody,
     @Req() req: Request,

@@ -5,13 +5,17 @@ import {
   Res,
   Req,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
+import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import type { Response, Request } from 'express';
 import logger from '../logger';
 
 @Controller('api/v1/text-to-speech')
 export class TtsController {
   @Post()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 500, ttl: 60000 } })
   async textToSpeech(
     @Body() body: { text: string; includeTimestamps?: boolean },
     @Req() req: Request,

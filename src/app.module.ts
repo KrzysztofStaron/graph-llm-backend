@@ -7,6 +7,7 @@ import { DocumentModule } from './document/document.module';
 import { CollaborationModule } from './collaboration/collaboration.module';
 import { ChatModule } from './chat/chat.module';
 import { TtsModule } from './tts/tts.module';
+import { StorageModule } from './storage/storage.module';
 import { ThrottlerExceptionFilter } from './throttler-exception.filter';
 
 @Module({
@@ -42,6 +43,7 @@ import { ThrottlerExceptionFilter } from './throttler-exception.filter';
     CollaborationModule,
     ChatModule,
     TtsModule,
+    StorageModule,
   ],
   controllers: [AppController],
   providers: [

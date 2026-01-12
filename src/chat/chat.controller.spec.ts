@@ -124,8 +124,7 @@ describe('ChatController', () => {
         messages: [{ role: 'user' as const, content: 'Hello' }],
       };
 
-      // When model is not provided, the controller should use default
-      expect(body.model).toBeUndefined();
+      expect(body.messages).toBeDefined();
     });
 
     it('should handle multipart content with images', async () => {

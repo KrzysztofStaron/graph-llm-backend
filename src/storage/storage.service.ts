@@ -28,7 +28,7 @@ export class StorageService {
         projectId: process.env.FIREBASE_PROJECT_ID || 'graph-chat-fca91',
         storageBucket:
           process.env.FIREBASE_STORAGE_BUCKET ||
-          'graph-chat-fca91.firebasestorage.app',
+          'graphai-4782a.firebasestorage.app',
         messagingSenderId:
           process.env.FIREBASE_MESSAGING_SENDER_ID || '644040441418',
         appId:

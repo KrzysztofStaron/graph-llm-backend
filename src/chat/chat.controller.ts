@@ -665,7 +665,7 @@ export class ChatController {
                 prompt: args.prompt,
               })}\n\n`));
               
-              fullResponse = `[IMAGE:${imageUrl}]`;
+              fullResponse += `[IMAGE:${imageUrl}]`;
             } catch (imageError) {
               const errorMsg = imageError instanceof Error ? imageError.message : 'Image generation failed';
               logger.error('Image generation failed', { clientId, error: errorMsg, args: toolCall.arguments });
@@ -687,14 +687,14 @@ export class ChatController {
             try {
               const args = JSON.parse(toolCall.arguments) as { videoId: string; explanation?: string };
               
-              // Send YouTube video response in special format
+              // Send YouTube video response in special format (can be multiple)
               res.write(encoder.encode(`data: ${JSON.stringify({ 
                 type: 'youtube',
                 videoId: args.videoId,
                 explanation: args.explanation || '',
               })}\n\n`));
               
-              fullResponse = `[YOUTUBE:${args.videoId}]`;
+              fullResponse += `[YOUTUBE:${args.videoId}]`;
             } catch (youtubeError) {
               const errorMsg = youtubeError instanceof Error ? youtubeError.message : 'YouTube video embedding failed';
               logger.error('YouTube video embedding failed', { clientId, error: errorMsg, args: toolCall.arguments });

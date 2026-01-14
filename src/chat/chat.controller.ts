@@ -12,6 +12,7 @@ import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import type { Response, Request } from 'express';
 import { trace } from '@opentelemetry/api';
 import logger from '../logger';
+import { captureEvent } from '../posthog.service';
 
 // SDK-compatible types (using camelCase for imageUrl as SDK expects)
 type TextContentPartSDK = { type: 'text'; text: string };
@@ -104,6 +105,11 @@ type ChatResponseChoice = {
 
 type ChatResponse = {
   choices: ChatResponseChoice[];
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 };
 
 type ChatStreamChunk = {
@@ -123,6 +129,11 @@ type ChatStreamChunk = {
     };
     finish_reason?: string | null;
   }[];
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 };
 
 // Tool definitions for image generation
@@ -515,6 +526,21 @@ export class ChatController {
       logData.error = errorMessage;
       logger.error('POST /api/v1/chat failed', logData);
 
+      // Track message sent event with error
+      captureEvent(
+        clientId || 'anonymous',
+        'message_sent',
+        {
+          model,
+          provider: body.provider,
+          messageCount: transformedMessages.length,
+          hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
+          success: false,
+          error: errorMessage,
+          safetyFilterTriggered: logData.safetyFilterTriggered,
+        },
+      );
+
       throw new HttpException(
         { error: 'Failed to get chat response', details: errorMessage },
         HttpStatus.BAD_GATEWAY,
@@ -527,6 +553,23 @@ export class ChatController {
     logData.responseLength = result.length;
     logData.responsePreview = result.substring(0, 1000) + (result.length > 1000 ? '...' : '');
     logger.info('POST /api/v1/chat', logData);
+
+      // Track message sent event
+      captureEvent(
+        clientId || 'anonymous',
+        'message_sent',
+        {
+          model,
+          provider: body.provider,
+          messageCount: transformedMessages.length,
+          responseLength: result.length,
+          inputTokens: response.usage?.prompt_tokens,
+          outputTokens: response.usage?.completion_tokens,
+          totalTokens: response.usage?.total_tokens,
+          hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
+          success: true,
+        },
+      );
 
     return result;
   }
@@ -668,6 +711,11 @@ export class ChatController {
     let fullResponse = '';
     let fullReasoning = '';
     let chunkCount = 0;
+    let usageData: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    } | null = null;
 
     // Track tool calls being assembled from streaming chunks
     const toolCallsInProgress: Map<
@@ -679,6 +727,11 @@ export class ChatController {
     try {
       for await (const chunk of stream) {
         chunkCount++;
+
+        // Capture usage data if available
+        if (chunk.usage) {
+          usageData = chunk.usage;
+        }
 
         const choice = chunk.choices?.[0];
         if (!choice) continue;
@@ -846,6 +899,29 @@ export class ChatController {
       span.end();
 
       logger.info('POST /api/v1/chat/stream', logData);
+
+      // Track message sent event
+      captureEvent(
+        clientId || 'anonymous',
+        'message_sent',
+        {
+          model: body.model || 'x-ai/grok-4.1-fast',
+          provider: body.provider,
+          messageCount: transformedMessages.length,
+          responseLength: fullResponse.length,
+          reasoningLength: fullReasoning.length,
+          chunkCount,
+          finishReason,
+          toolCallCount: toolCallsInProgress.size,
+          inputTokens: usageData?.prompt_tokens,
+          outputTokens: usageData?.completion_tokens,
+          totalTokens: usageData?.total_tokens,
+          hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
+          hasImageGeneration: toolCallsInProgress.size > 0 && Array.from(toolCallsInProgress.values()).some((tc) => tc.name === 'generate_image'),
+          hasYoutubeEmbed: toolCallsInProgress.size > 0 && Array.from(toolCallsInProgress.values()).some((tc) => tc.name === 'show_youtube_video'),
+          success: true,
+        },
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Stream error';
@@ -853,8 +929,27 @@ export class ChatController {
       logData.stack = error instanceof Error ? error.stack : undefined;
       logData.chunkCount = chunkCount;
       logger.error('Chat stream error', logData);
-        fullResponseLength: fullResponse.length,
-      });
+
+      // Track message sent event with error
+      captureEvent(
+        clientId || 'anonymous',
+        'message_sent',
+        {
+          model: body.model || 'x-ai/grok-4.1-fast',
+          provider: body.provider,
+          messageCount: transformedMessages.length,
+          responseLength: fullResponse.length,
+          reasoningLength: fullReasoning.length,
+          chunkCount,
+          inputTokens: usageData?.prompt_tokens,
+          outputTokens: usageData?.completion_tokens,
+          totalTokens: usageData?.total_tokens,
+          hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
+          success: false,
+          error: errorMessage,
+        },
+      );
+
       res.write(
         encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`),
       );

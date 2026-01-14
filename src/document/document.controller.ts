@@ -7,11 +7,13 @@ import {
   HttpStatus,
   Res,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
-import type { Response } from 'express';
+import type { Response, Request } from 'express';
 import { DocumentParserService } from './document-parser.service';
+import { captureEvent } from '../posthog.service';
 
 @Controller('api/v1/document')
 export class DocumentController {
@@ -24,6 +26,7 @@ export class DocumentController {
   async parseDocument(
     @UploadedFile() file: Express.Multer.File,
     @Res() res: Response,
+    @Req() req: Request,
   ): Promise<void> {
     if (!file) {
       res.status(HttpStatus.BAD_REQUEST).json({
@@ -70,11 +73,17 @@ export class DocumentController {
       return;
     }
 
+    const clientId = req.headers['x-client-id'] as string | undefined;
+    const startTime = Date.now();
+
     try {
       const text = await this.documentParserService.parseDocument(
         file.buffer,
         file.mimetype || 'application/octet-stream',
       );
+
+      const duration = Date.now() - startTime;
+      const textLength = text.length;
 
       res.json({
         text,
@@ -84,9 +93,39 @@ export class DocumentController {
           size: file.size,
         },
       });
+
+      // Track document parsing event
+      captureEvent(
+        clientId || 'anonymous',
+        'document_parsed',
+        {
+          filename: file.originalname,
+          mimeType: file.mimetype,
+          fileSize: file.size,
+          textLength,
+          duration,
+          success: true,
+        },
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
+      const duration = Date.now() - startTime;
+
+      // Track document parsing error
+      captureEvent(
+        clientId || 'anonymous',
+        'document_parsed',
+        {
+          filename: file.originalname,
+          mimeType: file.mimetype,
+          fileSize: file.size,
+          duration,
+          success: false,
+          error: errorMessage,
+        },
+      );
+
       res.status(HttpStatus.BAD_REQUEST).json({
         error: 'Failed to parse document',
         details: errorMessage,

@@ -4,6 +4,7 @@ import { AppModule } from './app.module';
 import { json } from 'express';
 import { HttpExceptionFilter } from './http-exception.filter';
 import { TraceInterceptor } from './trace.interceptor';
+import { shutdownPostHog } from './posthog.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -52,6 +53,14 @@ async function bootstrap() {
   // Add global trace interceptor to extract and set trace IDs
   app.useGlobalInterceptors(new TraceInterceptor());
   app.enableShutdownHooks();
+
+  // Graceful shutdown for PostHog
+  process.on('SIGTERM', async () => {
+    await shutdownPostHog();
+  });
+  process.on('SIGINT', async () => {
+    await shutdownPostHog();
+  });
 
   await app.listen(process.env.PORT ?? 9955);
 }

@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { json } from 'express';
 import { HttpExceptionFilter } from './http-exception.filter';
+import { TraceInterceptor } from './trace.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -38,6 +39,7 @@ async function bootstrap() {
       'Authorization',
       'X-Requested-With',
       'X-Client-Id',
+      'X-Trace-Id',
     ],
     credentials: false,
     preflightContinue: false,
@@ -47,6 +49,8 @@ async function bootstrap() {
 
   // Add global exception filter to ensure CORS headers on all error responses
   app.useGlobalFilters(new HttpExceptionFilter());
+  // Add global trace interceptor to extract and set trace IDs
+  app.useGlobalInterceptors(new TraceInterceptor());
   app.enableShutdownHooks();
 
   await app.listen(process.env.PORT ?? 9955);

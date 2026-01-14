@@ -1,6 +1,7 @@
 import { config } from 'dotenv';
 import { createLogger, format, transports } from 'winston';
 import axios from 'axios';
+import { getTraceContext } from './trace-context';
 
 // Load .env file early
 config();
@@ -19,21 +20,36 @@ async function sendToLoki(info: {
   message: unknown;
   level: string;
   timestamp?: string;
+  traceId?: string;
   [key: string]: unknown;
 }): Promise<void> {
   if (!lokiHost || !lokiBasicAuth) return;
 
+  const traceContext = getTraceContext();
+  const traceId = traceContext?.traceId || info.traceId;
+  
+  // Ensure traceId is in the info object before stringifying
+  if (traceId && !info.traceId) {
+    info.traceId = traceId;
+  }
+  
   const timestamp = info.timestamp || new Date().toISOString();
   const timestampNs = `${Date.parse(timestamp)}000000`;
   const message = JSON.stringify(info);
 
+  const streamLabels: Record<string, string> = {
+    app: 'graph-llm-backend',
+    env: process.env.NODE_ENV || 'development',
+    service: 'graph-llm-backend',
+  };
+
+  if (traceId) {
+    streamLabels.traceId = traceId;
+  }
+
   const streams = [
     {
-      stream: {
-        app: 'graph-llm-backend',
-        env: process.env.NODE_ENV || 'development',
-        service: 'graph-llm-backend',
-      },
+      stream: streamLabels,
       values: [[timestampNs, message]],
     },
   ];
@@ -56,6 +72,13 @@ async function sendToLoki(info: {
 
 // Custom format that sends to Loki
 const lokiFormat = format((info) => {
+  const traceContext = getTraceContext();
+  if (traceContext) {
+    info.traceId = traceContext.traceId;
+    if (traceContext.clientId) {
+      info.clientId = traceContext.clientId;
+    }
+  }
   // Send to Loki asynchronously (fire and forget)
   sendToLoki(info).catch(() => {
     // Ignore errors

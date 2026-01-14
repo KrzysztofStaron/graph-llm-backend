@@ -441,12 +441,25 @@ export class ChatController {
     const clientId = req.headers['x-client-id'] as string | undefined;
     const model = body.model || 'x-ai/grok-4.1-fast';
 
+    const logData: {
+      clientId?: string;
+      model?: string;
+      provider?: unknown;
+      messages?: unknown[];
+      error?: string;
+      responseLength?: number;
+      responsePreview?: string;
+      safetyFilterTriggered?: boolean;
+    } = {
+      clientId,
+      model,
+      provider: body.provider,
+    };
+
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey || apiKey.length === 0) {
-      logger.error('POST /api/v1/chat failed', {
-        clientId,
-        error: 'OPENROUTER_API_KEY not set',
-      });
+      logData.error = 'OPENROUTER_API_KEY not set';
+      logger.error('POST /api/v1/chat failed', logData);
       throw new HttpException(
         {
           error:
@@ -463,23 +476,16 @@ export class ChatController {
     });
 
     const transformedMessages = transformMessages(body.messages);
-
-    // Log the request with context
-    logger.info('POST /api/v1/chat', {
-      clientId,
-      model,
-      provider: body.provider,
-      messages: transformedMessages
-        .filter((msg) => msg.role !== 'system')
-        .map((msg) => ({
-          role: msg.role,
-          content:
-            typeof msg.content === 'string'
-              ? msg.content.substring(0, 500) +
-                (msg.content.length > 500 ? '...' : '')
-              : '[multipart content]',
-        })),
-    });
+    logData.messages = transformedMessages
+      .filter((msg) => msg.role !== 'system')
+      .map((msg) => ({
+        role: msg.role,
+        content:
+          typeof msg.content === 'string'
+            ? msg.content.substring(0, 500) +
+              (msg.content.length > 500 ? '...' : '')
+            : '[multipart content]',
+      }));
 
     let response: ChatResponse;
     try {
@@ -503,18 +509,11 @@ export class ChatController {
       } else if (errorMessage.includes('SAFETY_CHECK_TYPE_DATA_LEAKAGE')) {
         errorMessage =
           "Content was flagged by the AI provider's safety filter. This has been logged and should be resolved with a retry.";
-        logger.warn('Safety filter triggered (data leakage)', {
-          clientId,
-          model,
-          fullError: errorMessage,
-        });
+        logData.safetyFilterTriggered = true;
       }
 
-      logger.error('POST /api/v1/chat failed', {
-        clientId,
-        model,
-        error: errorMessage,
-      });
+      logData.error = errorMessage;
+      logger.error('POST /api/v1/chat failed', logData);
 
       throw new HttpException(
         { error: 'Failed to get chat response', details: errorMessage },
@@ -525,13 +524,9 @@ export class ChatController {
     const content = response.choices[0]?.message?.content;
     const result = typeof content === 'string' ? content : '';
 
-    // Log the response
-    logger.info('POST /api/v1/chat response', {
-      clientId,
-      model,
-      response: result.substring(0, 1000) + (result.length > 1000 ? '...' : ''),
-      responseLength: result.length,
-    });
+    logData.responseLength = result.length;
+    logData.responsePreview = result.substring(0, 1000) + (result.length > 1000 ? '...' : '');
+    logger.info('POST /api/v1/chat', logData);
 
     return result;
   }
@@ -548,6 +543,33 @@ export class ChatController {
     const span = tracer.startSpan('api/v1/chat/stream');
     const clientId = req.headers['x-client-id'] as string | undefined;
 
+    const logData: {
+      clientId?: string;
+      model?: string;
+      provider?: unknown;
+      ip?: string;
+      messages?: unknown[];
+      error?: string;
+      originalError?: string;
+      stack?: string;
+      safetyFilterTriggered?: boolean;
+      responseLength?: number;
+      responsePreview?: string;
+      reasoningLength?: number;
+      chunkCount?: number;
+      finishReason?: string | null;
+      toolCallCount?: number;
+      statusCode?: number;
+      noContent?: boolean;
+      imageGenerationError?: string;
+      youtubeError?: string;
+    } = {
+      clientId,
+      model: body.model || 'x-ai/grok-4.1-fast',
+      provider: body.provider,
+      ip: req.ip,
+    };
+
     if (clientId) {
       span.setAttribute('client.id', clientId);
     }
@@ -563,10 +585,8 @@ export class ChatController {
     if (!apiKey || apiKey.length === 0) {
       const errorMessage =
         'OPENROUTER_API_KEY environment variable is not set or is empty';
-      logger.error('Failed to initialize chat stream', {
-        clientId,
-        error: errorMessage,
-      });
+      logData.error = errorMessage;
+      logger.error('Failed to initialize chat stream', logData);
       const encoder = new TextEncoder();
       res.write(
         encoder.encode(
@@ -588,24 +608,16 @@ export class ChatController {
     });
 
     const transformedMessages = transformMessages(body.messages);
-
-    // Log the request with context
-    logger.info('POST /api/v1/chat/stream', {
-      clientId,
-      model: body.model || 'x-ai/grok-4.1-fast',
-      provider: body.provider,
-      ip: req.ip,
-      messages: transformedMessages
-        .filter((msg) => msg.role !== 'system')
-        .map((msg) => ({
-          role: msg.role,
-          content:
-            typeof msg.content === 'string'
-              ? msg.content.substring(0, 500) +
-                (msg.content.length > 500 ? '...' : '')
-              : '[multipart content]',
-        })),
-    });
+    logData.messages = transformedMessages
+      .filter((msg) => msg.role !== 'system')
+      .map((msg) => ({
+        role: msg.role,
+        content:
+          typeof msg.content === 'string'
+            ? msg.content.substring(0, 500) +
+              (msg.content.length > 500 ? '...' : '')
+            : '[multipart content]',
+      }));
 
     let stream: AsyncIterable<ChatStreamChunk>;
     try {
@@ -631,22 +643,13 @@ export class ChatController {
       } else if (errorMessage.includes('SAFETY_CHECK_TYPE_DATA_LEAKAGE')) {
         errorMessage =
           "Content was flagged by the AI provider's safety filter. This has been logged and will be retried with a different format.";
-        logger.warn(
-          'Safety filter triggered (data leakage) - stream initialization',
-          {
-            clientId,
-            model: body.model || 'x-ai/grok-4.1-fast',
-            fullError: error instanceof Error ? error.message : String(error),
-          },
-        );
+        logData.safetyFilterTriggered = true;
       }
 
-      logger.error('Failed to initialize chat stream', {
-        clientId,
-        error: errorMessage,
-        originalError: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
+      logData.error = errorMessage;
+      logData.originalError = error instanceof Error ? error.message : String(error);
+      logData.stack = error instanceof Error ? error.stack : undefined;
+      logger.error('Failed to initialize chat stream', logData);
       const encoder = new TextEncoder();
       res.write(
         encoder.encode(
@@ -739,13 +742,6 @@ export class ChatController {
         for (const [index, toolCall] of toolCallsInProgress) {
           // If the model called the image generation tool
           if (toolCall.name === 'generate_image') {
-            logger.info('Processing image generation tool call', {
-              clientId,
-              index,
-              toolCallId: toolCall.id,
-              arguments: toolCall.arguments,
-            });
-
             try {
               const args = JSON.parse(toolCall.arguments) as {
                 prompt: string;
@@ -777,11 +773,7 @@ export class ChatController {
                 imageError instanceof Error
                   ? imageError.message
                   : 'Image generation failed';
-              logger.error('Image generation failed', {
-                clientId,
-                error: errorMsg,
-                args: toolCall.arguments,
-              });
+              logData.imageGenerationError = errorMsg;
               res.write(
                 encoder.encode(
                   `data: ${JSON.stringify({
@@ -794,13 +786,6 @@ export class ChatController {
 
           // If the model called the YouTube video tool
           if (toolCall.name === 'show_youtube_video') {
-            logger.info('Processing YouTube video tool call', {
-              clientId,
-              index,
-              toolCallId: toolCall.id,
-              arguments: toolCall.arguments,
-            });
-
             try {
               const args = JSON.parse(toolCall.arguments) as {
                 videoId: string;
@@ -824,11 +809,7 @@ export class ChatController {
                 youtubeError instanceof Error
                   ? youtubeError.message
                   : 'YouTube video embedding failed';
-              logger.error('YouTube video embedding failed', {
-                clientId,
-                error: errorMsg,
-                args: toolCall.arguments,
-              });
+              logData.youtubeError = errorMsg;
               res.write(
                 encoder.encode(
                   `data: ${JSON.stringify({
@@ -841,27 +822,21 @@ export class ChatController {
         }
       }
 
+      logData.responseLength = fullResponse.length;
+      logData.responsePreview = fullResponse.substring(0, 1000) + (fullResponse.length > 1000 ? '...' : '');
+      logData.reasoningLength = fullReasoning.length;
+      logData.chunkCount = chunkCount;
+      logData.finishReason = finishReason;
+      logData.toolCallCount = toolCallsInProgress.size;
+      logData.statusCode = res.statusCode;
+
       // Log warning if stream ended with no content and no tool calls
       if (
         fullResponse.length === 0 &&
         fullReasoning.length === 0 &&
         toolCallsInProgress.size === 0
       ) {
-        logger.warn('POST /api/v1/chat/stream ended with no content', {
-          clientId,
-          model: body.model || 'x-ai/grok-4.1-fast',
-          chunkCount,
-          finishReason,
-          messagePreview: transformedMessages
-            .filter((msg) => msg.role !== 'system')
-            .map((msg) => ({
-              role: msg.role,
-              content:
-                typeof msg.content === 'string'
-                  ? msg.content.substring(0, 300)
-                  : '[multipart content]',
-            })),
-        });
+        logData.noContent = true;
       }
 
       res.write(encoder.encode('data: [DONE]\n\n'));
@@ -870,27 +845,14 @@ export class ChatController {
       span.setAttribute('http.status_text', 'OK');
       span.end();
 
-      // Log the response
-      logger.info('POST /api/v1/chat/stream response', {
-        clientId,
-        response:
-          fullResponse.substring(0, 1000) +
-          (fullResponse.length > 1000 ? '...' : ''),
-        responseLength: fullResponse.length,
-        reasoningLength: fullReasoning.length,
-        chunkCount,
-        finishReason,
-        toolCallCount: toolCallsInProgress.size,
-        statusCode: res.statusCode,
-      });
+      logger.info('POST /api/v1/chat/stream', logData);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Stream error';
-      logger.error('Chat stream error', {
-        clientId,
-        error: errorMessage,
-        stack: error instanceof Error ? error.stack : undefined,
-        chunkCount,
+      logData.error = errorMessage;
+      logData.stack = error instanceof Error ? error.stack : undefined;
+      logData.chunkCount = chunkCount;
+      logger.error('Chat stream error', logData);
         fullResponseLength: fullResponse.length,
       });
       res.write(

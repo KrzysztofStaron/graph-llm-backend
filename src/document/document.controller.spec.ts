@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { HttpStatus } from '@nestjs/common';
 import { DocumentController } from './document.controller';
 import { DocumentParserService } from './document-parser.service';
-import { Response } from 'express';
+import { Response, Request } from 'express';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { ExecutionContext } from '@nestjs/common';
 
@@ -10,6 +10,7 @@ describe('DocumentController', () => {
   let controller: DocumentController;
   let parserService: DocumentParserService;
   let mockResponse: Partial<Response>;
+  let mockRequest: Partial<Request>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -41,6 +42,11 @@ describe('DocumentController', () => {
       status: jest.fn().mockReturnThis(),
       json: jest.fn().mockReturnThis(),
     };
+
+    // Create mock request object
+    mockRequest = {
+      headers: {},
+    };
   });
 
   it('should be defined', () => {
@@ -65,7 +71,7 @@ describe('DocumentController', () => {
       const parsedText = 'Parsed PDF content';
       jest.spyOn(parserService, 'parseDocument').mockResolvedValue(parsedText);
 
-      await controller.parseDocument(mockFile, mockResponse as Response);
+      await controller.parseDocument(mockFile, mockResponse as Response, mockRequest as Request);
 
       expect(parserService.parseDocument).toHaveBeenCalledWith(
         mockFile.buffer,
@@ -99,7 +105,7 @@ describe('DocumentController', () => {
       const parsedText = 'Parsed DOCX content';
       jest.spyOn(parserService, 'parseDocument').mockResolvedValue(parsedText);
 
-      await controller.parseDocument(mockFile, mockResponse as Response);
+      await controller.parseDocument(mockFile, mockResponse as Response, mockRequest as Request);
 
       expect(parserService.parseDocument).toHaveBeenCalledWith(
         mockFile.buffer,
@@ -119,6 +125,7 @@ describe('DocumentController', () => {
       await controller.parseDocument(
         undefined as any,
         mockResponse as Response,
+        mockRequest as Request,
       );
 
       expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
@@ -141,7 +148,7 @@ describe('DocumentController', () => {
         path: '',
       };
 
-      await controller.parseDocument(largeFile, mockResponse as Response);
+      await controller.parseDocument(largeFile, mockResponse as Response, mockRequest as Request);
 
       expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
       expect(mockResponse.json).toHaveBeenCalledWith({
@@ -166,7 +173,7 @@ describe('DocumentController', () => {
 
       jest.spyOn(parserService, 'parseDocument').mockResolvedValue('Content');
 
-      await controller.parseDocument(maxSizeFile, mockResponse as Response);
+      await controller.parseDocument(maxSizeFile, mockResponse as Response, mockRequest as Request);
 
       expect(parserService.parseDocument).toHaveBeenCalled();
       expect(mockResponse.json).toHaveBeenCalled();
@@ -186,7 +193,7 @@ describe('DocumentController', () => {
         path: '',
       };
 
-      await controller.parseDocument(unsupportedFile, mockResponse as Response);
+      await controller.parseDocument(unsupportedFile, mockResponse as Response, mockRequest as Request);
 
       expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
       expect(mockResponse.json).toHaveBeenCalledWith({
@@ -228,7 +235,7 @@ describe('DocumentController', () => {
           json: jest.fn().mockReturnThis(),
         };
 
-        await controller.parseDocument(mockFile, response as any);
+        await controller.parseDocument(mockFile, response as any, mockRequest as Request);
 
         expect(response.status).not.toHaveBeenCalledWith(
           HttpStatus.BAD_REQUEST,
@@ -252,7 +259,7 @@ describe('DocumentController', () => {
 
       jest.spyOn(parserService, 'parseDocument').mockResolvedValue('Content');
 
-      await controller.parseDocument(mockFile, mockResponse as Response);
+      await controller.parseDocument(mockFile, mockResponse as Response, mockRequest as Request);
 
       expect(parserService.parseDocument).toHaveBeenCalled();
       expect(mockResponse.json).toHaveBeenCalled();
@@ -272,7 +279,7 @@ describe('DocumentController', () => {
         path: '',
       };
 
-      await controller.parseDocument(mockFile, mockResponse as Response);
+      await controller.parseDocument(mockFile, mockResponse as Response, mockRequest as Request);
 
       expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
       expect(mockResponse.json).toHaveBeenCalledWith({
@@ -300,7 +307,7 @@ describe('DocumentController', () => {
         .spyOn(parserService, 'parseDocument')
         .mockRejectedValue(new Error(errorMessage));
 
-      await controller.parseDocument(mockFile, mockResponse as Response);
+      await controller.parseDocument(mockFile, mockResponse as Response, mockRequest as Request);
 
       expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
       expect(mockResponse.json).toHaveBeenCalledWith({
@@ -327,7 +334,7 @@ describe('DocumentController', () => {
         .spyOn(parserService, 'parseDocument')
         .mockRejectedValue('Unknown error string');
 
-      await controller.parseDocument(mockFile, mockResponse as Response);
+      await controller.parseDocument(mockFile, mockResponse as Response, mockRequest as Request);
 
       expect(mockResponse.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
       expect(mockResponse.json).toHaveBeenCalledWith({
@@ -352,7 +359,7 @@ describe('DocumentController', () => {
 
       jest.spyOn(parserService, 'parseDocument').mockResolvedValue('Content');
 
-      await controller.parseDocument(mockFile, mockResponse as Response);
+      await controller.parseDocument(mockFile, mockResponse as Response, mockRequest as Request);
 
       expect(parserService.parseDocument).toHaveBeenCalled();
       expect(mockResponse.json).toHaveBeenCalled();

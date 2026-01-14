@@ -5,7 +5,7 @@
 
 import { AsyncLocalStorage } from 'async_hooks';
 
-interface TraceContext {
+export interface TraceContext {
   traceId: string;
   clientId?: string;
 }

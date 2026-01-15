@@ -339,7 +339,10 @@ async function generateImage(
 
     const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
 
-    if (!imageUrl || !imageUrl.startsWith('data:image/')) {
+    // Accept both data URLs (base64) and hosted URLs (https://)
+    const isValidUrl = imageUrl && (imageUrl.startsWith('data:image/') || imageUrl.startsWith('http://') || imageUrl.startsWith('https://'));
+
+    if (!isValidUrl) {
       logger.error('Invalid image generation response structure', {
         responsePreview: JSON.stringify(data).substring(0, 1000),
         hasChoices: !!data.choices,
@@ -350,12 +353,15 @@ async function generateImage(
           ? Object.keys(data.choices[0].message)
           : [],
         retryCount,
+        receivedImageUrl: imageUrl?.substring(0, 100),
+        receivedImageUrlLength: imageUrl?.length,
       });
 
       // Retry up to 2 times if no image is returned
       if (retryCount < 2) {
-        logger.warn('No image returned, retrying...', {
+        logger.warn('No valid image URL returned, retrying...', {
           retryCount: retryCount + 1,
+          receivedUrl: imageUrl?.substring(0, 100),
         });
         await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second before retry
         return generateImage(messages, prompt, style, model, retryCount + 1);
@@ -366,8 +372,15 @@ async function generateImage(
       );
     }
 
+    // Log whether it's a data URL or hosted URL
+    const isDataUrl = imageUrl.startsWith('data:');
+    const urlType = isDataUrl ? 'base64 data URL' : 'hosted URL';
+    const urlLength = isDataUrl ? Math.round(imageUrl.length / 1024) : imageUrl.length;
+    const urlSizeUnit = isDataUrl ? 'KB' : 'chars';
     logger.info('Image generated successfully', {
-      urlPrefix: imageUrl.substring(0, 50),
+      urlType,
+      urlLength: `${urlLength}${urlSizeUnit}`,
+      urlPrefix: imageUrl.substring(0, 100),
       retryCount,
     });
     return imageUrl;

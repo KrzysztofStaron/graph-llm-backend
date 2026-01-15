@@ -377,12 +377,29 @@ async function generateImage(
     const urlType = isDataUrl ? 'base64 data URL' : 'hosted URL';
     const urlLength = isDataUrl ? Math.round(imageUrl.length / 1024) : imageUrl.length;
     const urlSizeUnit = isDataUrl ? 'KB' : 'chars';
-    logger.info('Image generated successfully', {
-      urlType,
-      urlLength: `${urlLength}${urlSizeUnit}`,
-      urlPrefix: imageUrl.substring(0, 100),
-      retryCount,
-    });
+    const warningLevel = isDataUrl ? 'warn' : 'info';
+    const message = isDataUrl 
+      ? `Image generated but as base64 data URL (${urlLength}KB) - prefer hosted URLs`
+      : `Image generated as hosted URL (${urlLength} chars)`;
+
+    // Comprehensive single log call
+    if (warningLevel === 'warn') {
+      logger.warn(`[IMAGE_GENERATION] [WARN] ${message}`, {
+        urlType,
+        urlLength: `${urlLength}${urlSizeUnit}`,
+        urlPrefix: imageUrl.substring(0, 100),
+        retryCount,
+        model,
+      });
+    } else {
+      logger.info(`[IMAGE_GENERATION] [OK] ${message}`, {
+        urlType,
+        urlLength: `${urlLength}${urlSizeUnit}`,
+        urlPrefix: imageUrl.substring(0, 50),
+        retryCount,
+        model,
+      });
+    }
     return imageUrl;
   } catch (error: any) {
     clearTimeout(timeoutId);
@@ -896,13 +913,20 @@ export class ChatController {
       logData.toolCallCount = toolCallsInProgress.size;
       logData.statusCode = res.statusCode;
 
-      // Log warning if stream ended with no content and no tool calls
+      // Determine stream status
+      let streamStatus = 'OK';
+      let streamStatusMessage = 'Stream completed successfully';
       if (
         fullResponse.length === 0 &&
         fullReasoning.length === 0 &&
         toolCallsInProgress.size === 0
       ) {
         logData.noContent = true;
+        streamStatus = 'WARN';
+        streamStatusMessage = 'Stream completed but no content generated';
+      } else if (toolCallsInProgress.size > 0) {
+        streamStatus = 'OK_WITH_TOOLS';
+        streamStatusMessage = `Stream completed with ${toolCallsInProgress.size} tool call(s)`;
       }
 
       res.write(encoder.encode('data: [DONE]\n\n'));
@@ -911,7 +935,10 @@ export class ChatController {
       span.setAttribute('http.status_text', 'OK');
       span.end();
 
-      logger.info('POST /api/v1/chat/stream', logData);
+      // Consolidated stream completion log
+      logData.streamStatus = streamStatus;
+      logData.streamMessage = streamStatusMessage;
+      logger.info(`[STREAM_COMPLETION] [${streamStatus}] ${streamStatusMessage}`, logData);
 
       // Track message sent event
       captureEvent(

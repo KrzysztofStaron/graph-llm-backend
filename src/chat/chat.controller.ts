@@ -636,6 +636,8 @@ export class ChatController {
       noContent?: boolean;
       imageGenerationError?: string;
       youtubeError?: string;
+      streamStatus?: string;
+      streamMessage?: string;
     } = {
       clientId,
       model: body.model || 'x-ai/grok-4.1-fast',

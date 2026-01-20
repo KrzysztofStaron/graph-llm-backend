@@ -189,6 +189,39 @@ const YOUTUBE_VIDEO_TOOL = {
   },
 };
 
+// Maximum size for a single data URL in image generation context (200KB)
+// Larger images can cause the image generation API to timeout
+const MAX_IMAGE_URL_SIZE_FOR_GENERATION = 200 * 1024;
+
+// Filter and limit images in messages for image generation
+function filterMessagesForImageGeneration(messages: MessageSDK[]): MessageSDK[] {
+  return messages.map((msg): MessageSDK => {
+    if ((msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content)) {
+      const filteredContent = msg.content.filter((part) => {
+        if (part.type === 'image_url') {
+          const url = part.imageUrl?.url || '';
+          // Always keep hosted URLs (they're small references)
+          if (url.startsWith('http://') || url.startsWith('https://')) {
+            return true;
+          }
+          // For data URLs, skip if too large
+          if (url.startsWith('data:') && url.length > MAX_IMAGE_URL_SIZE_FOR_GENERATION) {
+            logger.warn('Skipping oversized data URL in image generation context', {
+              sizeKB: Math.round(url.length / 1024),
+              maxSizeKB: Math.round(MAX_IMAGE_URL_SIZE_FOR_GENERATION / 1024),
+            });
+            return false;
+          }
+          return true;
+        }
+        return true;
+      });
+      return { ...msg, content: filteredContent } as MessageSDK;
+    }
+    return msg;
+  });
+}
+
 // Image generation function
 async function generateImage(
   messages: MessageSDK[],
@@ -202,8 +235,21 @@ async function generateImage(
     throw new Error('OPENROUTER_API_KEY not set for image generation');
   }
 
+  // Filter out oversized data URLs from context to prevent API timeouts
+  const filteredMessages = filterMessagesForImageGeneration(messages);
+
   // Count how many images are in the context (both user and assistant messages)
-  const imageCount = messages.filter((msg) => {
+  const imageCount = filteredMessages.filter((msg) => {
+    if (
+      (msg.role === 'user' || msg.role === 'assistant') &&
+      Array.isArray(msg.content)
+    ) {
+      return msg.content.some((part) => part.type === 'image_url');
+    }
+    return false;
+  }).length;
+
+  const originalImageCount = messages.filter((msg) => {
     if (
       (msg.role === 'user' || msg.role === 'assistant') &&
       Array.isArray(msg.content)
@@ -217,19 +263,21 @@ async function generateImage(
     prompt: prompt.substring(0, 200),
     style,
     retryCount,
-    contextMessageCount: messages.length,
+    contextMessageCount: filteredMessages.length,
     imagesInContext: imageCount,
+    originalImagesInContext: originalImageCount,
+    imagesFiltered: originalImageCount - imageCount,
   });
 
   // Use OpenRouter chat completion with Gemini 3 Pro Image (image editing model)
-  // Pass the full conversation context so it can see previous images and messages
+  // Pass the filtered conversation context so it can see previous images and messages
   const imageGenMessages: MessageSDK[] = [
     {
       role: 'system' as const,
       content:
         "You are an image generation and editing AI. Use the images and context from the conversation to generate or edit images based on the user's request. Always return an image.",
     },
-    ...messages,
+    ...filteredMessages,
     {
       role: 'user' as const,
       content: prompt,
@@ -328,7 +376,7 @@ async function generateImage(
     const data = (await response.json()) as {
       choices: Array<{
         message: {
-          content?: string;
+          content?: string | Array<{ type: string; image_url?: { url: string }; text?: string }>;
           images?: Array<{
             type: string;
             image_url: { url: string };
@@ -337,24 +385,58 @@ async function generateImage(
       }>;
     };
 
-    const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    // Try multiple extraction patterns for the image URL
+    // Pattern 1: images array in message (Gemini format)
+    let imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+
+    // Pattern 2: content array with image_url type (OpenAI multimodal format)
+    if (!imageUrl && Array.isArray(data.choices?.[0]?.message?.content)) {
+      const contentArray = data.choices[0].message.content;
+      const imageContent = contentArray.find((item) => 
+        item.type === 'image_url' && item.image_url?.url
+      );
+      if (imageContent && imageContent.image_url) {
+        imageUrl = imageContent.image_url.url;
+      }
+    }
+
+    // Pattern 3: Check if content itself is a data URL (some models return image directly)
+    if (!imageUrl && typeof data.choices?.[0]?.message?.content === 'string') {
+      const content = data.choices[0].message.content;
+      if (content.startsWith('data:image/') || 
+          content.match(/^https?:\/\/.*\.(png|jpg|jpeg|gif|webp)/i)) {
+        imageUrl = content;
+      }
+    }
 
     // Accept both data URLs (base64) and hosted URLs (https://)
     const isValidUrl = imageUrl && (imageUrl.startsWith('data:image/') || imageUrl.startsWith('http://') || imageUrl.startsWith('https://'));
 
     if (!isValidUrl) {
+      // Log detailed response structure for debugging
+      const responseContent = data.choices?.[0]?.message?.content;
+      const contentType = Array.isArray(responseContent) 
+        ? `array[${responseContent.length}]` 
+        : typeof responseContent;
+      
       logger.error('Invalid image generation response structure', {
-        responsePreview: JSON.stringify(data).substring(0, 1000),
+        responsePreview: JSON.stringify(data).substring(0, 2000),
         hasChoices: !!data.choices,
+        choicesCount: data.choices?.length,
         hasMessage: !!data.choices?.[0]?.message,
         hasImages: !!data.choices?.[0]?.message?.images,
-        messageContent: data.choices?.[0]?.message?.content?.substring(0, 200),
+        imagesCount: data.choices?.[0]?.message?.images?.length,
+        contentType,
+        messageContent: typeof responseContent === 'string' 
+          ? responseContent.substring(0, 500) 
+          : JSON.stringify(responseContent)?.substring(0, 500),
         messageKeys: data.choices?.[0]?.message
           ? Object.keys(data.choices[0].message)
           : [],
         retryCount,
         receivedImageUrl: imageUrl?.substring(0, 100),
         receivedImageUrlLength: imageUrl?.length,
+        model,
       });
 
       // Retry up to 2 times if no image is returned
@@ -362,20 +444,29 @@ async function generateImage(
         logger.warn('No valid image URL returned, retrying...', {
           retryCount: retryCount + 1,
           receivedUrl: imageUrl?.substring(0, 100),
+          model,
         });
         await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second before retry
         return generateImage(messages, prompt, style, model, retryCount + 1);
       }
 
+      // Provide more helpful error message
+      const errorDetails = data.choices?.[0]?.message?.content 
+        ? `Model response: ${typeof responseContent === 'string' ? responseContent.substring(0, 200) : 'multipart content'}`
+        : 'No content in response';
+      
       throw new Error(
-        `No valid image URL returned after ${retryCount + 1} attempts. Got: ${imageUrl?.substring(0, 100)}`,
+        `No valid image URL returned after ${retryCount + 1} attempts. ${errorDetails}`,
       );
     }
 
+    // At this point imageUrl is guaranteed to be valid (isValidUrl check passed)
+    const validImageUrl = imageUrl as string;
+    
     // Log whether it's a data URL or hosted URL
-    const isDataUrl = imageUrl.startsWith('data:');
+    const isDataUrl = validImageUrl.startsWith('data:');
     const urlType = isDataUrl ? 'base64 data URL' : 'hosted URL';
-    const urlLength = isDataUrl ? Math.round(imageUrl.length / 1024) : imageUrl.length;
+    const urlLength = isDataUrl ? Math.round(validImageUrl.length / 1024) : validImageUrl.length;
     const urlSizeUnit = isDataUrl ? 'KB' : 'chars';
     const warningLevel = isDataUrl ? 'warn' : 'info';
     const message = isDataUrl 
@@ -387,7 +478,7 @@ async function generateImage(
       logger.warn(`[IMAGE_GENERATION] [WARN] ${message}`, {
         urlType,
         urlLength: `${urlLength}${urlSizeUnit}`,
-        urlPrefix: imageUrl.substring(0, 100),
+        urlPrefix: validImageUrl.substring(0, 100),
         retryCount,
         model,
       });
@@ -395,12 +486,12 @@ async function generateImage(
       logger.info(`[IMAGE_GENERATION] [OK] ${message}`, {
         urlType,
         urlLength: `${urlLength}${urlSizeUnit}`,
-        urlPrefix: imageUrl.substring(0, 50),
+        urlPrefix: validImageUrl.substring(0, 50),
         retryCount,
         model,
       });
     }
-    return imageUrl;
+    return validImageUrl;
   } catch (error: any) {
     clearTimeout(timeoutId);
 

@@ -89,7 +89,7 @@ describe('ThrottlerExceptionFilter', () => {
       );
       expect(mockResponse.setHeader).toHaveBeenCalledWith(
         'Access-Control-Allow-Headers',
-        'Content-Type, Authorization, X-Requested-With, X-Client-Id',
+        'Content-Type, Authorization, X-Requested-With, X-Client-Id, X-Trace-Id',
       );
     });
 
@@ -165,15 +165,34 @@ describe('ThrottlerExceptionFilter', () => {
       );
     });
 
-    it('should use fallback origin for disallowed origin', () => {
-      mockRequest.headers = { origin: 'https://evil.com' };
+    it('should echo a Vercel preview origin', () => {
+      mockRequest.headers = {
+        origin:
+          'https://graph-llm-git-fix-generation-e121f9-krzysztof-starons-projects.vercel.app',
+      };
       const exception = new ThrottlerException('Too Many Requests');
 
       filter.catch(exception, mockArgumentsHost);
 
       expect(mockResponse.setHeader).toHaveBeenCalledWith(
         'Access-Control-Allow-Origin',
+        'https://graph-llm-git-fix-generation-e121f9-krzysztof-starons-projects.vercel.app',
+      );
+    });
+
+    it('should omit Allow-Origin for a disallowed origin', () => {
+      mockRequest.headers = { origin: 'https://evil.com' };
+      const exception = new ThrottlerException('Too Many Requests');
+
+      filter.catch(exception, mockArgumentsHost);
+
+      expect(mockResponse.setHeader).not.toHaveBeenCalledWith(
+        'Access-Control-Allow-Origin',
         'http://localhost:3000',
+      );
+      expect(mockResponse.setHeader).not.toHaveBeenCalledWith(
+        'Access-Control-Allow-Origin',
+        'https://evil.com',
       );
     });
 

@@ -83,7 +83,13 @@ type RequestBody = {
     allow_fallbacks?: boolean;
   };
   plugins?: WebSearchPlugin[];
+  reasoning?: {
+    effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'minimal' | 'none';
+  };
 };
+
+/** OpenRouter/Grok default is `high`; use `low` to cut first-token latency. */
+const DEFAULT_REASONING = { effort: 'low' as const };
 
 // Response types for SDK
 type ToolCall = {
@@ -628,6 +634,7 @@ export class ChatController {
           sort: 'latency',
         },
         messages: transformedMessages,
+        reasoning: body.reasoning || DEFAULT_REASONING,
         ...(body.plugins && { plugins: body.plugins }),
       })) as ChatResponse;
     } catch (error) {
@@ -796,6 +803,7 @@ export class ChatController {
         messages: transformedMessages,
         tools: [IMAGE_GENERATION_TOOL, YOUTUBE_VIDEO_TOOL],
         toolChoice: 'auto',
+        reasoning: body.reasoning || DEFAULT_REASONING,
         ...(body.plugins && { plugins: body.plugins }),
       })) as AsyncIterable<ChatStreamChunk>;
     } catch (error) {
@@ -923,27 +931,40 @@ export class ChatController {
                 prompt: string;
                 style?: string;
               };
-              const imageModel =
-                body.imageModel || 'google/gemini-3-pro-image-preview';
-              const imageUrl = await generateImage(
-                transformedMessages,
-                args.prompt,
-                args.style,
-                imageModel,
-              );
 
-              // Send image response in special format
-              res.write(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: 'image',
-                    content: imageUrl,
-                    prompt: args.prompt,
-                  })}\n\n`,
-                ),
-              );
+              // No imageModel => client will generate via OpenAI (/api/generate-image).
+              // Only run OpenRouter image generation when an explicit model is provided.
+              if (!body.imageModel) {
+                res.write(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      type: 'image',
+                      content: '',
+                      prompt: args.prompt,
+                    })}\n\n`,
+                  ),
+                );
+                fullResponse += `[IMAGE:client]`;
+              } else {
+                const imageUrl = await generateImage(
+                  transformedMessages,
+                  args.prompt,
+                  args.style,
+                  body.imageModel,
+                );
 
-              fullResponse += `[IMAGE:${imageUrl}]`;
+                res.write(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      type: 'image',
+                      content: imageUrl,
+                      prompt: args.prompt,
+                    })}\n\n`,
+                  ),
+                );
+
+                fullResponse += `[IMAGE:${imageUrl}]`;
+              }
             } catch (imageError) {
               const errorMsg =
                 imageError instanceof Error

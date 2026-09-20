@@ -1,6 +1,7 @@
 import { Catch, ArgumentsHost } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
 import { Request, Response } from 'express';
+import { applyCorsHeaders } from './cors';
 
 @Catch(ThrottlerException)
 export class ThrottlerExceptionFilter {
@@ -9,28 +10,7 @@ export class ThrottlerExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
-    const origin = request.headers.origin;
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:9955',
-      'https://graphai.one',
-      'https://www.graphai.one',
-      'https://api.graphai.one',
-      'https://graph-llm-seven.vercel.app',
-    ];
-    const isAllowed = !origin || allowedOrigins.includes(origin);
-    const allowOrigin = isAllowed ? origin || '*' : allowedOrigins[0];
-
-    // Set CORS headers
-    response.setHeader('Access-Control-Allow-Origin', allowOrigin);
-    response.setHeader(
-      'Access-Control-Allow-Methods',
-      'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-    );
-    response.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Requested-With, X-Client-Id',
-    );
+    applyCorsHeaders(response, request.headers.origin);
 
     // Set rate limit headers (informational)
     response.setHeader('X-RateLimit-Limit', '1000');

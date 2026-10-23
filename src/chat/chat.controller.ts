@@ -228,6 +228,72 @@ function filterMessagesForImageGeneration(messages: MessageSDK[]): MessageSDK[] 
   });
 }
 
+// Image-only models (e.g. OpenAI gpt-image-*) are rejected by OpenRouter's
+// /chat/completions endpoint ("cannot be used with the chat/completions
+// endpoint"). They must go through /api/v1/images instead.
+function isImageOnlyModel(model: string): boolean {
+  return /^openai\/gpt-image-/i.test(model);
+}
+
+async function generateImageViaImagesEndpoint(
+  prompt: string,
+  model: string,
+  apiKey: string,
+): Promise<string> {
+  logger.info('Generating image via images endpoint', {
+    model,
+    prompt: prompt.substring(0, 200),
+  });
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/images', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://graphai.one',
+        'X-Title': 'GraphAI',
+      },
+      body: JSON.stringify({ model, prompt, size: '1024x1024' }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error('Image generation failed', {
+        status: response.status,
+        error: errorText,
+        model,
+      });
+      throw new Error(`Image generation failed: ${errorText}`);
+    }
+
+    const data = (await response.json()) as {
+      data?: Array<{ b64_json?: string; url?: string; media_type?: string }>;
+    };
+    const item = data.data?.[0];
+    if (item?.b64_json) {
+      return `data:${item.media_type || 'image/png'};base64,${item.b64_json}`;
+    }
+    if (item?.url) {
+      return item.url;
+    }
+    throw new Error(
+      `No image returned by images endpoint for model ${model}`,
+    );
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      throw new Error('Image generation timed out after 120 seconds.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // Image generation function
 async function generateImage(
   messages: MessageSDK[],
@@ -239,6 +305,10 @@ async function generateImage(
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY not set for image generation');
+  }
+
+  if (isImageOnlyModel(model)) {
+    return generateImageViaImagesEndpoint(prompt, model, apiKey);
   }
 
   // Filter out oversized data URLs from context to prevent API timeouts

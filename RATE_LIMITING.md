@@ -89,10 +89,16 @@ Rate limit violations are logged through the existing logger. Monitor for:
 - Patterns indicating abuse
 - Legitimate users hitting limits
 
+## Serverless
+
+On Vercel the counters live in the memory of one function instance. They are not shared across instances, and they disappear when that instance is recycled. Chat history is not part of this store: every chat request sends its own `messages`. The limits are an abuse brake, not application state.
+
+`trust proxy` is enabled so the limiter sees the caller address from `X-Forwarded-For` instead of the platform proxy.
+
 ## Notes
 
-- Limits are per IP address
-- Limits reset every minute (sliding window)
+- Limits are per IP address, per function instance
+- Limits reset every minute (sliding window), and also when the instance goes away
 - Very generous limits to avoid impacting legitimate users
 - Can be adjusted based on usage patterns and abuse detection
 

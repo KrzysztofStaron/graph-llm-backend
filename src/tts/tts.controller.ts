@@ -10,6 +10,7 @@ import {
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import type { Response, Request } from 'express';
 import logger from '../logger';
+import { beginAudioStream, writeAudioChunk } from '../streaming';
 
 @Controller('api/v1/text-to-speech')
 export class TtsController {
@@ -210,10 +211,7 @@ export class TtsController {
         return;
       }
 
-      // Set appropriate headers for audio streaming (no timestamps)
-      res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Transfer-Encoding', 'chunked');
+      beginAudioStream(res);
 
       // Stream the response body directly to client
       if (!deepgramResponse.body) {
@@ -237,7 +235,7 @@ export class TtsController {
             break;
           }
           bytesStreamed += value.length;
-          res.write(Buffer.from(value));
+          writeAudioChunk(res, value);
         }
       };
 

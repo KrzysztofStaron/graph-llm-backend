@@ -13,6 +13,8 @@ import type { Response, Request } from 'express';
 import { trace } from '@opentelemetry/api';
 import logger from '../logger';
 import { captureEvent } from '../posthog.service';
+import { beginSseStream, writeSse } from '../streaming';
+import { isMockLlmEnabled, mockChatStream, mockChatText } from './mock-llm';
 
 // SDK-compatible types (using camelCase for imageUrl as SDK expects)
 type TextContentPartSDK = { type: 'text'; text: string };
@@ -200,9 +202,14 @@ const YOUTUBE_VIDEO_TOOL = {
 const MAX_IMAGE_URL_SIZE_FOR_GENERATION = 200 * 1024;
 
 // Filter and limit images in messages for image generation
-function filterMessagesForImageGeneration(messages: MessageSDK[]): MessageSDK[] {
+function filterMessagesForImageGeneration(
+  messages: MessageSDK[],
+): MessageSDK[] {
   return messages.map((msg): MessageSDK => {
-    if ((msg.role === 'user' || msg.role === 'assistant') && Array.isArray(msg.content)) {
+    if (
+      (msg.role === 'user' || msg.role === 'assistant') &&
+      Array.isArray(msg.content)
+    ) {
       const filteredContent = msg.content.filter((part) => {
         if (part.type === 'image_url') {
           const url = part.imageUrl?.url || '';
@@ -211,11 +218,17 @@ function filterMessagesForImageGeneration(messages: MessageSDK[]): MessageSDK[] 
             return true;
           }
           // For data URLs, skip if too large
-          if (url.startsWith('data:') && url.length > MAX_IMAGE_URL_SIZE_FOR_GENERATION) {
-            logger.warn('Skipping oversized data URL in image generation context', {
-              sizeKB: Math.round(url.length / 1024),
-              maxSizeKB: Math.round(MAX_IMAGE_URL_SIZE_FOR_GENERATION / 1024),
-            });
+          if (
+            url.startsWith('data:') &&
+            url.length > MAX_IMAGE_URL_SIZE_FOR_GENERATION
+          ) {
+            logger.warn(
+              'Skipping oversized data URL in image generation context',
+              {
+                sizeKB: Math.round(url.length / 1024),
+                maxSizeKB: Math.round(MAX_IMAGE_URL_SIZE_FOR_GENERATION / 1024),
+              },
+            );
             return false;
           }
           return true;
@@ -281,9 +294,7 @@ async function generateImageViaImagesEndpoint(
     if (item?.url) {
       return item.url;
     }
-    throw new Error(
-      `No image returned by images endpoint for model ${model}`,
-    );
+    throw new Error(`No image returned by images endpoint for model ${model}`);
   } catch (error: any) {
     if (error.name === 'AbortError') {
       throw new Error('Image generation timed out after 120 seconds.');
@@ -452,7 +463,13 @@ async function generateImage(
     const data = (await response.json()) as {
       choices: Array<{
         message: {
-          content?: string | Array<{ type: string; image_url?: { url: string }; text?: string }>;
+          content?:
+            | string
+            | Array<{
+                type: string;
+                image_url?: { url: string };
+                text?: string;
+              }>;
           images?: Array<{
             type: string;
             image_url: { url: string };
@@ -468,8 +485,8 @@ async function generateImage(
     // Pattern 2: content array with image_url type (OpenAI multimodal format)
     if (!imageUrl && Array.isArray(data.choices?.[0]?.message?.content)) {
       const contentArray = data.choices[0].message.content;
-      const imageContent = contentArray.find((item) => 
-        item.type === 'image_url' && item.image_url?.url
+      const imageContent = contentArray.find(
+        (item) => item.type === 'image_url' && item.image_url?.url,
       );
       if (imageContent && imageContent.image_url) {
         imageUrl = imageContent.image_url.url;
@@ -479,22 +496,28 @@ async function generateImage(
     // Pattern 3: Check if content itself is a data URL (some models return image directly)
     if (!imageUrl && typeof data.choices?.[0]?.message?.content === 'string') {
       const content = data.choices[0].message.content;
-      if (content.startsWith('data:image/') || 
-          content.match(/^https?:\/\/.*\.(png|jpg|jpeg|gif|webp)/i)) {
+      if (
+        content.startsWith('data:image/') ||
+        content.match(/^https?:\/\/.*\.(png|jpg|jpeg|gif|webp)/i)
+      ) {
         imageUrl = content;
       }
     }
 
     // Accept both data URLs (base64) and hosted URLs (https://)
-    const isValidUrl = imageUrl && (imageUrl.startsWith('data:image/') || imageUrl.startsWith('http://') || imageUrl.startsWith('https://'));
+    const isValidUrl =
+      imageUrl &&
+      (imageUrl.startsWith('data:image/') ||
+        imageUrl.startsWith('http://') ||
+        imageUrl.startsWith('https://'));
 
     if (!isValidUrl) {
       // Log detailed response structure for debugging
       const responseContent = data.choices?.[0]?.message?.content;
-      const contentType = Array.isArray(responseContent) 
-        ? `array[${responseContent.length}]` 
+      const contentType = Array.isArray(responseContent)
+        ? `array[${responseContent.length}]`
         : typeof responseContent;
-      
+
       logger.error('Invalid image generation response structure', {
         responsePreview: JSON.stringify(data).substring(0, 2000),
         hasChoices: !!data.choices,
@@ -503,9 +526,10 @@ async function generateImage(
         hasImages: !!data.choices?.[0]?.message?.images,
         imagesCount: data.choices?.[0]?.message?.images?.length,
         contentType,
-        messageContent: typeof responseContent === 'string' 
-          ? responseContent.substring(0, 500) 
-          : JSON.stringify(responseContent)?.substring(0, 500),
+        messageContent:
+          typeof responseContent === 'string'
+            ? responseContent.substring(0, 500)
+            : JSON.stringify(responseContent)?.substring(0, 500),
         messageKeys: data.choices?.[0]?.message
           ? Object.keys(data.choices[0].message)
           : [],
@@ -527,10 +551,10 @@ async function generateImage(
       }
 
       // Provide more helpful error message
-      const errorDetails = data.choices?.[0]?.message?.content 
+      const errorDetails = data.choices?.[0]?.message?.content
         ? `Model response: ${typeof responseContent === 'string' ? responseContent.substring(0, 200) : 'multipart content'}`
         : 'No content in response';
-      
+
       throw new Error(
         `No valid image URL returned after ${retryCount + 1} attempts. ${errorDetails}`,
       );
@@ -538,14 +562,16 @@ async function generateImage(
 
     // At this point imageUrl is guaranteed to be valid (isValidUrl check passed)
     const validImageUrl = imageUrl as string;
-    
+
     // Log whether it's a data URL or hosted URL
     const isDataUrl = validImageUrl.startsWith('data:');
     const urlType = isDataUrl ? 'base64 data URL' : 'hosted URL';
-    const urlLength = isDataUrl ? Math.round(validImageUrl.length / 1024) : validImageUrl.length;
+    const urlLength = isDataUrl
+      ? Math.round(validImageUrl.length / 1024)
+      : validImageUrl.length;
     const urlSizeUnit = isDataUrl ? 'KB' : 'chars';
     const warningLevel = isDataUrl ? 'warn' : 'info';
-    const message = isDataUrl 
+    const message = isDataUrl
       ? `Image generated but as base64 data URL (${urlLength}KB) - prefer hosted URLs`
       : `Image generated as hosted URL (${urlLength} chars)`;
 
@@ -664,6 +690,13 @@ export class ChatController {
       provider: body.provider,
     };
 
+    if (isMockLlmEnabled()) {
+      const result = mockChatText();
+      logData.responseLength = result.length;
+      logger.info('POST /api/v1/chat (mock)', logData);
+      return result;
+    }
+
     const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey || apiKey.length === 0) {
       logData.error = 'OPENROUTER_API_KEY not set';
@@ -725,19 +758,15 @@ export class ChatController {
       logger.error('POST /api/v1/chat failed', logData);
 
       // Track message sent event with error
-      captureEvent(
-        clientId || 'anonymous',
-        'message_sent',
-        {
-          model,
-          provider: body.provider,
-          messageCount: transformedMessages.length,
-          hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
-          success: false,
-          error: errorMessage,
-          safetyFilterTriggered: logData.safetyFilterTriggered,
-        },
-      );
+      captureEvent(clientId || 'anonymous', 'message_sent', {
+        model,
+        provider: body.provider,
+        messageCount: transformedMessages.length,
+        hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
+        success: false,
+        error: errorMessage,
+        safetyFilterTriggered: logData.safetyFilterTriggered,
+      });
 
       throw new HttpException(
         { error: 'Failed to get chat response', details: errorMessage },
@@ -749,25 +778,22 @@ export class ChatController {
     const result = typeof content === 'string' ? content : '';
 
     logData.responseLength = result.length;
-    logData.responsePreview = result.substring(0, 1000) + (result.length > 1000 ? '...' : '');
+    logData.responsePreview =
+      result.substring(0, 1000) + (result.length > 1000 ? '...' : '');
     logger.info('POST /api/v1/chat', logData);
 
-      // Track message sent event
-      captureEvent(
-        clientId || 'anonymous',
-        'message_sent',
-        {
-          model,
-          provider: body.provider,
-          messageCount: transformedMessages.length,
-          responseLength: result.length,
-          inputTokens: response.usage?.prompt_tokens,
-          outputTokens: response.usage?.completion_tokens,
-          totalTokens: response.usage?.total_tokens,
-          hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
-          success: true,
-        },
-      );
+    // Track message sent event
+    captureEvent(clientId || 'anonymous', 'message_sent', {
+      model,
+      provider: body.provider,
+      messageCount: transformedMessages.length,
+      responseLength: result.length,
+      inputTokens: response.usage?.prompt_tokens,
+      outputTokens: response.usage?.completion_tokens,
+      totalTokens: response.usage?.total_tokens,
+      hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
+      success: true,
+    });
 
     return result;
   }
@@ -819,36 +845,8 @@ export class ChatController {
     span.setAttribute('http.method', 'POST');
     span.setAttribute('http.url', '/api/v1/chat/stream');
 
-    // Set streaming headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-
-    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-    if (!apiKey || apiKey.length === 0) {
-      const errorMessage =
-        'OPENROUTER_API_KEY environment variable is not set or is empty';
-      logData.error = errorMessage;
-      logger.error('Failed to initialize chat stream', logData);
-      const encoder = new TextEncoder();
-      res.write(
-        encoder.encode(
-          `data: ${JSON.stringify({ error: 'Failed to initialize chat stream', details: errorMessage })}\n\n`,
-        ),
-      );
-      res.end();
-      span.setAttribute('http.status_code', 500);
-      span.setAttribute('error', true);
-      span.setAttribute('error.message', errorMessage);
-      span.end();
-      return;
-    }
-
-    const { OpenRouter } = await import('@openrouter/sdk');
-
-    const openRouter = new OpenRouter({
-      apiKey,
-    });
+    beginSseStream(res);
+    const encoder = new TextEncoder();
 
     const transformedMessages = transformMessages(body.messages);
     logData.messages = transformedMessages
@@ -863,52 +861,80 @@ export class ChatController {
       }));
 
     let stream: AsyncIterable<ChatStreamChunk>;
-    try {
-      stream = (await openRouter.chat.send({
-        model: body.model || 'x-ai/grok-4.1-fast',
-        stream: true,
-        provider: body.provider || {
-          sort: 'latency',
-        },
-        messages: transformedMessages,
-        tools: [IMAGE_GENERATION_TOOL, YOUTUBE_VIDEO_TOOL],
-        toolChoice: 'auto',
-        reasoning: body.reasoning || DEFAULT_REASONING,
-        ...(body.plugins && { plugins: body.plugins }),
-      })) as AsyncIterable<ChatStreamChunk>;
-    } catch (error) {
-      let errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-
-      // Provide more helpful error messages for common OpenRouter errors
-      if (errorMessage.includes('User not found')) {
-        errorMessage =
-          'Invalid or missing OpenRouter API key. Please check your OPENROUTER_API_KEY environment variable.';
-      } else if (errorMessage.includes('SAFETY_CHECK_TYPE_DATA_LEAKAGE')) {
-        errorMessage =
-          "Content was flagged by the AI provider's safety filter. This has been logged and will be retried with a different format.";
-        logData.safetyFilterTriggered = true;
+    if (isMockLlmEnabled()) {
+      stream = mockChatStream();
+    } else {
+      const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+      if (!apiKey || apiKey.length === 0) {
+        const errorMessage =
+          'OPENROUTER_API_KEY environment variable is not set or is empty';
+        logData.error = errorMessage;
+        logger.error('Failed to initialize chat stream', logData);
+        writeSse(
+          res,
+          encoder,
+          `data: ${JSON.stringify({ error: 'Failed to initialize chat stream', details: errorMessage })}\n\n`,
+        );
+        res.end();
+        span.setAttribute('http.status_code', 500);
+        span.setAttribute('error', true);
+        span.setAttribute('error.message', errorMessage);
+        span.end();
+        return;
       }
 
-      logData.error = errorMessage;
-      logData.originalError = error instanceof Error ? error.message : String(error);
-      logData.stack = error instanceof Error ? error.stack : undefined;
-      logger.error('Failed to initialize chat stream', logData);
-      const encoder = new TextEncoder();
-      res.write(
-        encoder.encode(
+      const { OpenRouter } = await import('@openrouter/sdk');
+
+      const openRouter = new OpenRouter({
+        apiKey,
+      });
+
+      try {
+        stream = (await openRouter.chat.send({
+          model: body.model || 'x-ai/grok-4.1-fast',
+          stream: true,
+          provider: body.provider || {
+            sort: 'latency',
+          },
+          messages: transformedMessages,
+          tools: [IMAGE_GENERATION_TOOL, YOUTUBE_VIDEO_TOOL],
+          toolChoice: 'auto',
+          reasoning: body.reasoning || DEFAULT_REASONING,
+          ...(body.plugins && { plugins: body.plugins }),
+        })) as AsyncIterable<ChatStreamChunk>;
+      } catch (error) {
+        let errorMessage =
+          error instanceof Error ? error.message : 'Unknown error';
+
+        // Provide more helpful error messages for common OpenRouter errors
+        if (errorMessage.includes('User not found')) {
+          errorMessage =
+            'Invalid or missing OpenRouter API key. Please check your OPENROUTER_API_KEY environment variable.';
+        } else if (errorMessage.includes('SAFETY_CHECK_TYPE_DATA_LEAKAGE')) {
+          errorMessage =
+            "Content was flagged by the AI provider's safety filter. This has been logged and will be retried with a different format.";
+          logData.safetyFilterTriggered = true;
+        }
+
+        logData.error = errorMessage;
+        logData.originalError =
+          error instanceof Error ? error.message : String(error);
+        logData.stack = error instanceof Error ? error.stack : undefined;
+        logger.error('Failed to initialize chat stream', logData);
+        writeSse(
+          res,
+          encoder,
           `data: ${JSON.stringify({ error: 'Failed to initialize chat stream', details: errorMessage })}\n\n`,
-        ),
-      );
-      res.end();
-      span.setAttribute('http.status_code', res.statusCode);
-      span.setAttribute('error', true);
-      span.setAttribute('error.message', errorMessage);
-      span.end();
-      return;
+        );
+        res.end();
+        span.setAttribute('http.status_code', res.statusCode);
+        span.setAttribute('error', true);
+        span.setAttribute('error.message', errorMessage);
+        span.end();
+        return;
+      }
     }
 
-    const encoder = new TextEncoder();
     let fullResponse = '';
     let fullReasoning = '';
     let chunkCount = 0;
@@ -949,16 +975,14 @@ export class ChatController {
           delta?.reasoning ?? (delta as any)?.reasoning_content ?? '';
         if (reasoning) {
           fullReasoning += reasoning;
-          res.write(
-            encoder.encode(`data: ${JSON.stringify({ reasoning })}\n\n`),
-          );
+          writeSse(res, encoder, `data: ${JSON.stringify({ reasoning })}\n\n`);
         }
 
         // Handle regular text content
         const content = delta?.content ?? '';
         if (content) {
           fullResponse += content;
-          res.write(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+          writeSse(res, encoder, `data: ${JSON.stringify({ content })}\n\n`);
         }
 
         // Handle tool calls (assembled from streaming chunks)
@@ -1005,14 +1029,14 @@ export class ChatController {
               // No imageModel => client will generate via OpenAI (/api/generate-image).
               // Only run OpenRouter image generation when an explicit model is provided.
               if (!body.imageModel) {
-                res.write(
-                  encoder.encode(
-                    `data: ${JSON.stringify({
-                      type: 'image',
-                      content: '',
-                      prompt: args.prompt,
-                    })}\n\n`,
-                  ),
+                writeSse(
+                  res,
+                  encoder,
+                  `data: ${JSON.stringify({
+                    type: 'image',
+                    content: '',
+                    prompt: args.prompt,
+                  })}\n\n`,
                 );
                 fullResponse += `[IMAGE:client]`;
               } else {
@@ -1023,14 +1047,14 @@ export class ChatController {
                   body.imageModel,
                 );
 
-                res.write(
-                  encoder.encode(
-                    `data: ${JSON.stringify({
-                      type: 'image',
-                      content: imageUrl,
-                      prompt: args.prompt,
-                    })}\n\n`,
-                  ),
+                writeSse(
+                  res,
+                  encoder,
+                  `data: ${JSON.stringify({
+                    type: 'image',
+                    content: imageUrl,
+                    prompt: args.prompt,
+                  })}\n\n`,
                 );
 
                 fullResponse += `[IMAGE:${imageUrl}]`;
@@ -1041,12 +1065,12 @@ export class ChatController {
                   ? imageError.message
                   : 'Image generation failed';
               logData.imageGenerationError = errorMsg;
-              res.write(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    error: `Failed to generate image: ${errorMsg}`,
-                  })}\n\n`,
-                ),
+              writeSse(
+                res,
+                encoder,
+                `data: ${JSON.stringify({
+                  error: `Failed to generate image: ${errorMsg}`,
+                })}\n\n`,
               );
             }
           }
@@ -1060,14 +1084,14 @@ export class ChatController {
               };
 
               // Send YouTube video response in special format (can be multiple)
-              res.write(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: 'youtube',
-                    videoId: args.videoId,
-                    explanation: args.explanation || '',
-                  })}\n\n`,
-                ),
+              writeSse(
+                res,
+                encoder,
+                `data: ${JSON.stringify({
+                  type: 'youtube',
+                  videoId: args.videoId,
+                  explanation: args.explanation || '',
+                })}\n\n`,
               );
 
               fullResponse += `[YOUTUBE:${args.videoId}]`;
@@ -1077,12 +1101,12 @@ export class ChatController {
                   ? youtubeError.message
                   : 'YouTube video embedding failed';
               logData.youtubeError = errorMsg;
-              res.write(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    error: `Failed to embed YouTube video: ${errorMsg}`,
-                  })}\n\n`,
-                ),
+              writeSse(
+                res,
+                encoder,
+                `data: ${JSON.stringify({
+                  error: `Failed to embed YouTube video: ${errorMsg}`,
+                })}\n\n`,
               );
             }
           }
@@ -1090,7 +1114,9 @@ export class ChatController {
       }
 
       logData.responseLength = fullResponse.length;
-      logData.responsePreview = fullResponse.substring(0, 1000) + (fullResponse.length > 1000 ? '...' : '');
+      logData.responsePreview =
+        fullResponse.substring(0, 1000) +
+        (fullResponse.length > 1000 ? '...' : '');
       logData.reasoningLength = fullReasoning.length;
       logData.chunkCount = chunkCount;
       logData.finishReason = finishReason;
@@ -1113,7 +1139,7 @@ export class ChatController {
         streamStatusMessage = `Stream completed with ${toolCallsInProgress.size} tool call(s)`;
       }
 
-      res.write(encoder.encode('data: [DONE]\n\n'));
+      writeSse(res, encoder, 'data: [DONE]\n\n');
       res.end();
       span.setAttribute('http.status_code', res.statusCode);
       span.setAttribute('http.status_text', 'OK');
@@ -1122,30 +1148,37 @@ export class ChatController {
       // Consolidated stream completion log
       logData.streamStatus = streamStatus;
       logData.streamMessage = streamStatusMessage;
-      logger.info(`[STREAM_COMPLETION] [${streamStatus}] ${streamStatusMessage}`, logData);
+      logger.info(
+        `[STREAM_COMPLETION] [${streamStatus}] ${streamStatusMessage}`,
+        logData,
+      );
 
       // Track message sent event
-      captureEvent(
-        clientId || 'anonymous',
-        'message_sent',
-        {
-          model: body.model || 'x-ai/grok-4.1-fast',
-          provider: body.provider,
-          messageCount: transformedMessages.length,
-          responseLength: fullResponse.length,
-          reasoningLength: fullReasoning.length,
-          chunkCount,
-          finishReason,
-          toolCallCount: toolCallsInProgress.size,
-          inputTokens: usageData?.prompt_tokens,
-          outputTokens: usageData?.completion_tokens,
-          totalTokens: usageData?.total_tokens,
-          hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
-          hasImageGeneration: toolCallsInProgress.size > 0 && Array.from(toolCallsInProgress.values()).some((tc) => tc.name === 'generate_image'),
-          hasYoutubeEmbed: toolCallsInProgress.size > 0 && Array.from(toolCallsInProgress.values()).some((tc) => tc.name === 'show_youtube_video'),
-          success: true,
-        },
-      );
+      captureEvent(clientId || 'anonymous', 'message_sent', {
+        model: body.model || 'x-ai/grok-4.1-fast',
+        provider: body.provider,
+        messageCount: transformedMessages.length,
+        responseLength: fullResponse.length,
+        reasoningLength: fullReasoning.length,
+        chunkCount,
+        finishReason,
+        toolCallCount: toolCallsInProgress.size,
+        inputTokens: usageData?.prompt_tokens,
+        outputTokens: usageData?.completion_tokens,
+        totalTokens: usageData?.total_tokens,
+        hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
+        hasImageGeneration:
+          toolCallsInProgress.size > 0 &&
+          Array.from(toolCallsInProgress.values()).some(
+            (tc) => tc.name === 'generate_image',
+          ),
+        hasYoutubeEmbed:
+          toolCallsInProgress.size > 0 &&
+          Array.from(toolCallsInProgress.values()).some(
+            (tc) => tc.name === 'show_youtube_video',
+          ),
+        success: true,
+      });
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Stream error';
@@ -1155,27 +1188,25 @@ export class ChatController {
       logger.error('Chat stream error', logData);
 
       // Track message sent event with error
-      captureEvent(
-        clientId || 'anonymous',
-        'message_sent',
-        {
-          model: body.model || 'x-ai/grok-4.1-fast',
-          provider: body.provider,
-          messageCount: transformedMessages.length,
-          responseLength: fullResponse.length,
-          reasoningLength: fullReasoning.length,
-          chunkCount,
-          inputTokens: usageData?.prompt_tokens,
-          outputTokens: usageData?.completion_tokens,
-          totalTokens: usageData?.total_tokens,
-          hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
-          success: false,
-          error: errorMessage,
-        },
-      );
+      captureEvent(clientId || 'anonymous', 'message_sent', {
+        model: body.model || 'x-ai/grok-4.1-fast',
+        provider: body.provider,
+        messageCount: transformedMessages.length,
+        responseLength: fullResponse.length,
+        reasoningLength: fullReasoning.length,
+        chunkCount,
+        inputTokens: usageData?.prompt_tokens,
+        outputTokens: usageData?.completion_tokens,
+        totalTokens: usageData?.total_tokens,
+        hasWebSearch: !!body.plugins?.some((p) => p.id === 'web'),
+        success: false,
+        error: errorMessage,
+      });
 
-      res.write(
-        encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`),
+      writeSse(
+        res,
+        encoder,
+        `data: ${JSON.stringify({ error: errorMessage })}\n\n`,
       );
       res.end();
       span.setAttribute('http.status_code', res.statusCode);

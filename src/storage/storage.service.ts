@@ -8,6 +8,7 @@ import {
   deleteObject,
 } from 'firebase/storage';
 import * as crypto from 'crypto';
+import { MAX_REQUEST_BYTES } from '../limits';
 
 @Injectable()
 export class StorageService {
@@ -58,8 +59,7 @@ export class StorageService {
       );
     }
 
-    // Max 10MB for images
-    const MAX_SIZE = 10 * 1024 * 1024;
+    const MAX_SIZE = MAX_REQUEST_BYTES;
     if (file.size > MAX_SIZE) {
       throw new HttpException(
         `File too large. Maximum size is ${MAX_SIZE / (1024 * 1024)}MB`,

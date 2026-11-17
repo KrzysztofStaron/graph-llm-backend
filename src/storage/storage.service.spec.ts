@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { StorageService } from './storage.service';
+import { MAX_REQUEST_BYTES } from '../limits';
 import * as firebaseApp from 'firebase/app';
 import * as firebaseStorage from 'firebase/storage';
 
@@ -150,14 +151,14 @@ describe('StorageService', () => {
       );
     });
 
-    it('should throw error for file larger than 10MB', async () => {
+    it('should throw error for file larger than the request limit', async () => {
       const mockFile: Express.Multer.File = {
         fieldname: 'file',
         originalname: 'large.jpg',
         encoding: '7bit',
         mimetype: 'image/jpeg',
-        buffer: Buffer.alloc(11 * 1024 * 1024), // 11MB
-        size: 11 * 1024 * 1024,
+        buffer: Buffer.alloc(1),
+        size: MAX_REQUEST_BYTES + 1,
         stream: null as any,
         destination: '',
         filename: '',
@@ -168,18 +169,18 @@ describe('StorageService', () => {
         HttpException,
       );
       await expect(service.uploadImage(mockFile)).rejects.toThrow(
-        'File too large. Maximum size is 10MB',
+        `File too large. Maximum size is ${MAX_REQUEST_BYTES / (1024 * 1024)}MB`,
       );
     });
 
-    it('should accept file at maximum size limit (10MB)', async () => {
+    it('should accept file at maximum size limit', async () => {
       const mockFile: Express.Multer.File = {
         fieldname: 'file',
         originalname: 'max.jpg',
         encoding: '7bit',
         mimetype: 'image/jpeg',
-        buffer: Buffer.alloc(10 * 1024 * 1024), // Exactly 10MB
-        size: 10 * 1024 * 1024,
+        buffer: Buffer.alloc(1),
+        size: MAX_REQUEST_BYTES,
         stream: null as any,
         destination: '',
         filename: '',

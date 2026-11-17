@@ -14,6 +14,10 @@ export function getPostHogClient(): PostHog | null {
 
   posthogClient = new PostHog(apiKey, {
     host: 'https://eu.i.posthog.com',
+    // Send each event immediately. A serverless instance can freeze before a
+    // batched timer flushes, and nothing here is stored for a later request.
+    flushAt: 1,
+    flushInterval: 0,
   });
 
   return posthogClient;
@@ -45,4 +49,3 @@ export function shutdownPostHog(): Promise<void> {
     resolve();
   });
 }
-

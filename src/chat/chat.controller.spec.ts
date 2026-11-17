@@ -60,6 +60,8 @@ describe('ChatController', () => {
 
   afterEach(() => {
     delete process.env.OPENROUTER_API_KEY;
+    delete process.env.GRAPH_LLM_MOCK;
+    delete process.env.VERCEL_ENV;
   });
 
   it('should be defined', () => {
@@ -220,6 +222,48 @@ describe('ChatController', () => {
       // Test the request structure is valid
       expect(body.messages).toBeDefined();
       expect(Array.isArray(body.messages)).toBe(true);
+    });
+
+    it('should stream text and an image tool call without OpenRouter when mock mode is on', async () => {
+      process.env.GRAPH_LLM_MOCK = '1';
+      delete process.env.OPENROUTER_API_KEY;
+
+      await controller.streamChat(
+        {
+          messages: [{ role: 'user' as const, content: 'Draw a red circle' }],
+        },
+        mockRequest as Request,
+        mockResponse as Response,
+      );
+
+      const written = (mockResponse.write as jest.Mock).mock.calls
+        .map((call) => new TextDecoder().decode(call[0] as Uint8Array))
+        .join('');
+      expect(written).toContain('"content":"Mock "');
+      expect(written).toContain('"type":"image"');
+      expect(written).toContain('"prompt":"a red circle"');
+      expect(written).toContain('data: [DONE]');
+      expect(mockResponse.end).toHaveBeenCalled();
+    });
+
+    it('should ignore mock mode on a production deployment', async () => {
+      process.env.GRAPH_LLM_MOCK = '1';
+      process.env.VERCEL_ENV = 'production';
+      delete process.env.OPENROUTER_API_KEY;
+
+      await controller.streamChat(
+        {
+          messages: [{ role: 'user' as const, content: 'Hello' }],
+        },
+        mockRequest as Request,
+        mockResponse as Response,
+      );
+
+      const written = (mockResponse.write as jest.Mock).mock.calls
+        .map((call) => new TextDecoder().decode(call[0] as Uint8Array))
+        .join('');
+      expect(written).toContain('OPENROUTER_API_KEY');
+      expect(written).not.toContain('a red circle');
     });
 
     it('should handle missing OPENROUTER_API_KEY in stream', async () => {

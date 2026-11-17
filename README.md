@@ -1,147 +1,145 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# graph-llm-backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Tool-calling API for [graph-llm](https://github.com/KrzysztofStaron/graph-llm) (graphai.one). The browser sends the whole conversation on every request. This service calls OpenRouter, streams the reply, and runs the image and YouTube tools. It does not store chats.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+The process runs as one [Vercel Function](https://vercel.com/docs/frameworks/backend/nestjs) (Fluid compute, Frankfurt). Vercel detects NestJS from `src/main.ts` and `app.listen()`, so the same controllers serve locally and in production.
 
-## Description
+## Endpoints
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+| Method | Path | Response |
+| --- | --- | --- |
+| GET | `/` | Plain-text index |
+| POST | `/api/v1/chat` | Full assistant text |
+| POST | `/api/v1/chat/stream` | SSE (`data: {...}\n\n`, then `data: [DONE]\n\n`) |
+| POST | `/api/v1/text-to-speech` | Chunked `audio/mpeg`, or JSON when `includeTimestamps` is true |
+| POST | `/api/v1/document/parse` | Multipart field `file` |
+| POST | `/api/v1/storage/upload` | Multipart field `file`, image stored in Firebase |
+| GET | `/api/v1/collaboration` | Stub (`works`) |
 
-## Grafana Cloud Logging Setup
+There is no user authentication. The OpenRouter and Deepgram keys stay in environment variables. Browser access is limited by the origin allowlist in `src/cors.ts`.
 
-This application uses Winston with Loki transport for centralized logging to Grafana Cloud.
+SSE events the frontend already understands:
 
-### Quick Setup (Free Forever Plan)
+- `{ "content": "..." }` text
+- `{ "reasoning": "..." }` reasoning
+- `{ "type": "image", "content": "", "prompt": "..." }` when no `imageModel` was sent (the Next.js app generates the image)
+- `{ "type": "image", "content": "<url>", "prompt": "..." }` when `imageModel` is set
+- `{ "type": "youtube", "videoId": "...", "explanation": "..." }`
+- `{ "error": "...", "details": "..." }`
+- `[DONE]`
 
-1. **Sign up for Grafana Cloud**
-   - Visit https://grafana.com/auth/sign-up/
-   - Create a free account (no credit card required)
-   - Create a stack in the Cloud Portal
+`socket.io` is installed and unused. Nothing in this service holds a websocket.
 
-2. **Get your Loki credentials**
-   - In Grafana: Go to **Connections > Data sources > Loki**
-   - Copy the **URL** (e.g., `https://logs-prod-XXX.grafana.net`)
-   - Note your **Instance ID** (the number in the URL or username field)
+## Environment variables
 
-3. **Create an API Token**
-   - Go to **Security > Access Policies**
-   - Create a new policy with scope: `logs:write`
-   - Generate a token and save it securely
+Copy `.env.example` to `.env` for local runs. On Vercel, set the same names in Project → Settings → Environment Variables. Do not commit `.env`.
 
-4. **Configure environment variables**
-   ```bash
-   LOKI_HOST=https://logs-prod-XXX.grafana.net
-   LOKI_BASIC_AUTH=INSTANCE_ID:API_TOKEN
-   LOG_LEVEL=info  # optional: debug, info, warn, error
-   ```
+| Name | Required | Purpose |
+| --- | --- | --- |
+| `OPENROUTER_API_KEY` | Yes, for real chat | OpenRouter key used by `/api/v1/chat` and `/api/v1/chat/stream` |
+| `DEEPGRAM_API_KEY` | Only for TTS | Deepgram Aura speech and optional word timestamps |
+| `POSTHOG_API_KEY` | No | `message_sent` and `document_parsed` events. Sent immediately so a frozen instance does not drop them |
+| `FIREBASE_API_KEY` | No | Firebase web config for image upload. Public client values are the fallback |
+| `FIREBASE_AUTH_DOMAIN` | No | Firebase web config |
+| `FIREBASE_PROJECT_ID` | No | Firebase web config |
+| `FIREBASE_STORAGE_BUCKET` | No | Bucket for `POST /api/v1/storage/upload` |
+| `FIREBASE_MESSAGING_SENDER_ID` | No | Firebase web config |
+| `FIREBASE_APP_ID` | No | Firebase web config |
+| `FIREBASE_MEASUREMENT_ID` | No | Firebase web config |
+| `LOKI_HOST` | No | Grafana Loki push URL. `GRAPHANA_URL` is an alias |
+| `LOKI_BASIC_AUTH` | No | `instanceId:token`. Or set `GRAPHANA_USER` and `GRAPHANA_TOKEN` |
+| `LOG_LEVEL` | No | Winston level. Default `info`. Vercel also stores stdout |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | Turns on OpenTelemetry export. Off when unset |
+| `OTEL_EXPORTER_OTLP_HEADERS` | No | OTLP headers, read by the exporter |
+| `OTEL_RESOURCE_ATTRIBUTES` | No | Resource attributes |
+| `PORT` | No | Local listen port. Default `9955`. Vercel sets this itself |
+| `GRAPH_LLM_MOCK` | No | Set to `1` to stream a canned reply and a `generate_image` tool call without calling OpenRouter. Ignored when `VERCEL_ENV=production`. Do not set it on Production |
 
-   Example:
-   ```bash
-   LOKI_HOST=https://logs-prod-006.grafana.net
-   LOKI_BASIC_AUTH=123456:glc_eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-   ```
-
-5. **View logs in Grafana**
-   - Launch your Grafana stack
-   - Go to **Explore** (compass icon)
-   - Select **Loki** data source
-   - Query: `{app="graph-llm-backend"}`
-   - Filter errors: `{app="graph-llm-backend"} |= "error"`
-
-### Free Plan Limits
-- 50 GB logs ingestion/month
-- 14 days retention
-- 10k metric series
-- 3 users
-
-Logs are automatically batched and sent to Grafana Cloud. The logger falls back to console output if `LOKI_HOST` is not set.
-
-## Project setup
+## Local development
 
 ```bash
-$ pnpm install
+pnpm install
+pnpm start:dev
 ```
 
-## Compile and run the project
+`pnpm start:dev` is the same Nest process Vercel runs. To boot it through the Vercel CLI instead (CLI 48.4 or newer; `vercel login` once):
 
 ```bash
-# development
-$ pnpm run start
-
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+pnpm dlx vercel@latest dev --listen 9955
 ```
 
-## Run tests
+Mock a chat stream without a model key:
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+GRAPH_LLM_MOCK=1 pnpm start
+pnpm verify:stream
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+`verify:stream` reads `BASE_URL` (default `http://127.0.0.1:9955`). It fails unless text, the image tool event, and `[DONE]` arrive as more than one chunk.
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+pnpm test
+pnpm build
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Deploy
 
-## Resources
+1. Import `KrzysztofStaron/graph-llm-backend` at [vercel.com/new](https://vercel.com/new). Leave the framework on the detected NestJS preset. Do not set a build command or output directory.
+2. Set the environment variables above for Production and Preview. `OPENROUTER_API_KEY` is the one chat needs. Leave `GRAPH_LLM_MOCK` unset.
+3. Deploy. The function region is `fra1` and `maxDuration` is 300 seconds (`vercel.json`).
+4. Check `GET /` on the deployment URL, then a real stream:
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+curl -N -X POST "$DEPLOYMENT_URL/api/v1/chat/stream" \
+  -H 'content-type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Say hi in one word"}]}'
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+Tokens should print before the request finishes. The body ends with `data: [DONE]`.
 
-## Support
+5. In the Vercel project, add the domain `api.graphai.one` and follow the DNS record Vercel shows (replace the A record that pointed at the Contabo host `109.199.102.132`).
+6. After DNS moves, the frontend keeps working with no code change, because it already defaults to `https://api.graphai.one`.
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+Pull requests get a Vercel preview URL. Preview origins of the frontend are already allowed by `src/cors.ts`.
 
-## Stay in touch
+## Limits
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+- **Duration.** The function is allowed to run for 300 seconds. That covers the frontend's 120 second stream timeout plus an OpenRouter image call (60 seconds, or 120 seconds for `openai/gpt-image-*`). Hobby and Pro both allow 300 seconds with Fluid compute. Pro can be raised to 800 seconds in `vercel.json` if image calls start getting cut off. A client that goes idle still aborts on its own.
+- **Body size.** Vercel rejects request bodies over 4.5 MB. This service rejects `Content-Length` over 4 MB, and document and image uploads use the same cap (previously 25 MB and 10 MB on the VPS). Chat from the frontend is already capped at 450 KB in `app/utils/chatPayload.ts`, so normal messages are unaffected.
+- **Cold starts.** The Nest container is built once per warm instance and then reused. The first request after idle pays that startup. There is no always-on process.
+- **Cost.** Fluid compute bills CPU while the handler is running and memory while the instance is awake. Time spent waiting on OpenRouter or Deepgram is I/O, not busy CPU. There is no charge for an idle VPS. Streaming responses are not held to the 4.5 MB buffered-body cap.
+- **Rate limits.** `@nestjs/throttler` counts in the memory of one instance only. It does not coordinate across instances and it does not store chats. See `RATE_LIMITING.md`.
+- **Logs.** Stdout goes to Vercel. Loki and PostHog remain optional. A failed Loki push is ignored.
 
-## License
+## VPS deployment (removed)
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+This repo used to deploy itself. `.github/workflows/deploy.yml` SSHed to `109.199.102.132` as root, reset `/root/graph-llm-backend` to `origin/master`, and restarted systemd unit `graph-llm-backend.service`. That workflow is gone. Pushes to `master` no longer touch the VPS. CI (`.github/workflows/ci.yml`) only installs, tests, and builds.
+
+There was no Dockerfile and no pm2 config in this repo. The only process manager was that systemd unit.
+
+If the Contabo machine comes back and you want it to stay down:
+
+```bash
+sudo systemctl disable --now graph-llm-backend.service
+```
+
+You can delete `/root/graph-llm-backend` and the GitHub Actions secret `VPS_SSH_KEY` after DNS for `api.graphai.one` points at Vercel. Do not restore the SSH workflow.
+
+## Frontend cutover
+
+Repository: [KrzysztofStaron/graph-llm](https://github.com/KrzysztofStaron/graph-llm). No route moves into the Next.js app. Paths and JSON shapes stay the same.
+
+`app/globals.ts` reads `NEXT_PUBLIC_GRAPH_LLM_BACKEND_URL` and otherwise uses `https://api.graphai.one`. These files call that base URL:
+
+- `app/interfaces/aiService.ts` → `POST /api/v1/chat` and `POST /api/v1/chat/stream`
+- `app/interfaces/audioService.ts` → `POST /api/v1/text-to-speech`
+- `app/interfaces/storageService.ts` → `POST /api/v1/storage/upload`
+- `app/utils/documentParserClient.ts` → `POST /api/v1/document/parse`
+
+**Preferred cutover:** attach `api.graphai.one` to this Vercel project and update DNS. Redeploying the frontend is unnecessary, because the default base URL does not change.
+
+**Cutover before DNS, or a different host:** in the **graph-llm** Vercel project, set `NEXT_PUBLIC_GRAPH_LLM_BACKEND_URL` to the backend deployment origin (`https://<project>.vercel.app`, no trailing slash) for Production, Preview, and Development, then redeploy the frontend. Next.js inlines `NEXT_PUBLIC_*` at build time, so a running deployment will not pick the new value up by itself.
+
+CORS checks the page origin, not the API host. `https://graphai.one`, `https://www.graphai.one`, `https://graph-llm-seven.vercel.app`, other `graph-llm-*.vercel.app` hosts, and `*.krzysztof-starons-projects.vercel.app` are already allowed. A new site origin has to be added in `src/cors.ts`.
+
+Image generation for OpenAI image models stays in the frontend (`app/api/generate-image`). This API only calls OpenRouter for images when the request includes `imageModel`.

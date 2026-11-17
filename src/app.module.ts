@@ -16,7 +16,9 @@ import { ThrottlerExceptionFilter } from './throttler-exception.filter';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    // Rate limiting configuration - very generous limits
+    // Per-instance limits. Vercel does not share this memory across instances,
+    // and chat history is not stored here. Each chat request carries its own
+    // messages. See RATE_LIMITING.md.
     ThrottlerModule.forRoot([
       {
         name: 'default',

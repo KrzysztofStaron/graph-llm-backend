@@ -14,6 +14,7 @@ import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import type { Response, Request } from 'express';
 import { DocumentParserService } from './document-parser.service';
 import { captureEvent } from '../posthog.service';
+import { MAX_REQUEST_BYTES } from '../limits';
 
 @Controller('api/v1/document')
 export class DocumentController {
@@ -35,8 +36,7 @@ export class DocumentController {
       return;
     }
 
-    // Security: Validate file size (max 25MB)
-    const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+    const MAX_FILE_SIZE = MAX_REQUEST_BYTES;
     if (file.size > MAX_FILE_SIZE) {
       res.status(HttpStatus.BAD_REQUEST).json({
         error: 'File too large',
@@ -95,36 +95,28 @@ export class DocumentController {
       });
 
       // Track document parsing event
-      captureEvent(
-        clientId || 'anonymous',
-        'document_parsed',
-        {
-          filename: file.originalname,
-          mimeType: file.mimetype,
-          fileSize: file.size,
-          textLength,
-          duration,
-          success: true,
-        },
-      );
+      captureEvent(clientId || 'anonymous', 'document_parsed', {
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        textLength,
+        duration,
+        success: true,
+      });
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       const duration = Date.now() - startTime;
 
       // Track document parsing error
-      captureEvent(
-        clientId || 'anonymous',
-        'document_parsed',
-        {
-          filename: file.originalname,
-          mimeType: file.mimetype,
-          fileSize: file.size,
-          duration,
-          success: false,
-          error: errorMessage,
-        },
-      );
+      captureEvent(clientId || 'anonymous', 'document_parsed', {
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        fileSize: file.size,
+        duration,
+        success: false,
+        error: errorMessage,
+      });
 
       res.status(HttpStatus.BAD_REQUEST).json({
         error: 'Failed to parse document',

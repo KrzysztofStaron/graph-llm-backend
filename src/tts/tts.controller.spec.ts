@@ -168,7 +168,7 @@ describe('TtsController', () => {
       );
       expect(mockResponse.setHeader).toHaveBeenCalledWith(
         'Cache-Control',
-        'no-cache',
+        'no-cache, no-transform',
       );
       expect(mockResponse.setHeader).toHaveBeenCalledWith(
         'Transfer-Encoding',
